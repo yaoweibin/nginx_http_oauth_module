@@ -6,6 +6,8 @@
 #include "ngx_http_oauth_session.h"
 #include <oauth.h>
 
+static char * ngx_http_oauth_eval_variables(ngx_conf_t *cf, ngx_command_t *cmd,
+        void *conf);
 static char *ngx_http_oauth_session_zone(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
 
@@ -15,9 +17,15 @@ static ngx_int_t ngx_http_oauth_consumer_key_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
 static ngx_int_t ngx_http_oauth_nonce_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
-static ngx_int_t ngx_http_oauth_timestamp_variable(ngx_http_request_t *r,
+static ngx_int_t ngx_http_oauth_signed_request_token_uri_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
 static ngx_int_t ngx_http_oauth_signature_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_oauth_timestamp_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
 
 static ngx_int_t ngx_http_oauth_init(ngx_conf_t *cf);
@@ -41,6 +49,13 @@ static ngx_command_t  ngx_http_oauth_commands[] = {
       ngx_conf_set_flag_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_oauth_loc_conf_t, enable),
+      NULL },
+
+    { ngx_string("oauth_eval_variables"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
+      ngx_http_oauth_eval_variables,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      0,
       NULL },
 
     { ngx_string("oauth_session_zone"),
@@ -137,12 +152,24 @@ static ngx_http_variable_t  ngx_http_oauth_vars[] = {
       ngx_http_oauth_nonce_variable, 0,
       NGX_HTTP_VAR_NOHASH, 0 },
 
-    { ngx_string("oauth_timestamp"), NULL,
-      ngx_http_oauth_timestamp_variable, 0,
+    { ngx_string("oauth_signed_request_token_uri"), NULL,
+      ngx_http_oauth_signed_request_token_uri_variable, 0,
+      NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_string("oauth_signed_access_token_uri"), NULL,
+      ngx_http_oauth_signed_access_token_uri_variable, 0,
+      NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_string("oauth_signed_authenticated_call_uri"), NULL,
+      ngx_http_oauth_signed_authenticated_call_uri_variable, 0,
       NGX_HTTP_VAR_NOHASH, 0 },
 
     { ngx_string("oauth_signature"), NULL,
       ngx_http_oauth_signature_variable, 0,
+      NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_string("oauth_timestamp"), NULL,
+      ngx_http_oauth_timestamp_variable, 0,
       NGX_HTTP_VAR_NOHASH, 0 },
 
     { ngx_null_string, NULL, NULL, 0, 0, 0 }
@@ -166,9 +193,17 @@ ngx_http_oauth_consumer_key_variable(ngx_http_request_t *r,
     return NGX_OK;
 }
 
-
 static ngx_int_t 
 ngx_http_oauth_nonce_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    v->not_found = 1;
+
+    return NGX_OK;
+}
+
+static ngx_int_t 
+ngx_http_oauth_signed_request_token_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
 {
     u_char                     *req_url;
@@ -222,32 +257,36 @@ oauth_pstrdup(ngx_pool_t *pool, ngx_str_t *src)
 
 
 static ngx_int_t 
-ngx_http_oauth_signature_variable(ngx_http_request_t *r,
+ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
 {
-    u_char                     *req_url, name[1024];
-    ngx_int_t                   key;
-    ngx_str_t                   url, key_name, secret_name, t_key, t_secret;
+    u_char                     *req_url;
+    ngx_str_t                   url, t_key, t_secret;
     ngx_http_oauth_loc_conf_t  *olcf;
     ngx_http_variable_value_t  *vv;
 
-    key_name = (ngx_str_t) ngx_string("oauth_token");
-    secret_name = (ngx_str_t) ngx_string("oauth_token_secret");
-
     olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
 
-    ngx_memcpy(name, key_name.data, key_name.len);
-    key = ngx_hash_strlow(name, name, key_name.len);
-    vv = ngx_http_get_variable(r, &key_name, key);
+    if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
+
+    vv = ngx_http_get_indexed_variable(r, olcf->eval_token_index);
+
     t_key.len = vv->len;
     t_key.data = vv->data;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "oauth_token: \"%V\"", &t_key);
 
-    ngx_memcpy(name, secret_name.data, secret_name.len);
-    key = ngx_hash_strlow(name, name, secret_name.len);
-    vv = ngx_http_get_variable(r, &secret_name, key);
+    if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
+
+    vv = ngx_http_get_indexed_variable(r, olcf->eval_token_secret_index);
+
     t_secret.len = vv->len;
     t_secret.data = vv->data;
 
@@ -285,32 +324,35 @@ ngx_http_oauth_signature_variable(ngx_http_request_t *r,
 
 
 static ngx_int_t 
-ngx_http_oauth_timestamp_variable(ngx_http_request_t *r,
+ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
 {
-    u_char                     *req_url, name[1024];
-    ngx_int_t                   key;
-    ngx_str_t                   url, key_name, secret_name, t_key, t_secret;
+    u_char                     *req_url;
+    ngx_str_t                   url, t_key, t_secret;
     ngx_http_oauth_loc_conf_t  *olcf;
     ngx_http_variable_value_t  *vv;
 
-    key_name = (ngx_str_t) ngx_string("oauth_token");
-    secret_name = (ngx_str_t) ngx_string("oauth_token_secret");
-
     olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
 
-    ngx_memcpy(name, key_name.data, key_name.len);
-    key = ngx_hash_strlow(name, name, key_name.len);
-    vv = ngx_http_get_variable(r, &key_name, key);
+    if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
+
+    vv = ngx_http_get_indexed_variable(r, olcf->eval_token_index);
     t_key.len = vv->len;
     t_key.data = vv->data;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "oauth_token: \"%V\"", &t_key);
 
-    ngx_memcpy(name, secret_name.data, secret_name.len);
-    key = ngx_hash_strlow(name, name, secret_name.len);
-    vv = ngx_http_get_variable(r, &secret_name, key);
+    if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
+
+    vv = ngx_http_get_indexed_variable(r, olcf->eval_token_secret_index);
+
     t_secret.len = vv->len;
     t_secret.data = vv->data;
 
@@ -344,6 +386,83 @@ ngx_http_oauth_timestamp_variable(ngx_http_request_t *r,
     v->data = url.data;
 
     return NGX_OK;
+}
+
+
+static ngx_int_t 
+ngx_http_oauth_signature_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    v->not_found = 1;
+
+    return NGX_OK;
+}
+
+
+static ngx_int_t 
+ngx_http_oauth_timestamp_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    v->not_found = 1;
+
+    return NGX_OK;
+}
+
+
+static char *
+ngx_http_oauth_eval_variables(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+{
+    ngx_str_t                 *value;
+    ngx_int_t                  index;
+    ngx_http_variable_t       *v;
+
+    ngx_http_oauth_loc_conf_t *olcf = conf;
+
+    value = cf->args->elts;
+
+    if (value[1].data[0] != '$') {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid variable name \"%V\"", &value[1]);
+        return NGX_CONF_ERROR;
+    }
+
+    value[1].len--;
+    value[1].data++;
+
+    v = ngx_http_add_variable(cf, &value[1], NGX_HTTP_VAR_CHANGEABLE);
+    if (v == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    index = ngx_http_get_variable_index(cf, &value[1]);
+    if (index == NGX_ERROR) {
+        return NGX_CONF_ERROR;
+    }
+
+    olcf->eval_token_index = (ngx_uint_t) index;
+
+    if (value[2].data[0] != '$') {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid variable name \"%V\"", &value[2]);
+        return NGX_CONF_ERROR;
+    }
+
+    value[2].len--;
+    value[2].data++;
+
+    v = ngx_http_add_variable(cf, &value[2], NGX_HTTP_VAR_CHANGEABLE);
+    if (v == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    index = ngx_http_get_variable_index(cf, &value[2]);
+    if (index == NGX_ERROR) {
+        return NGX_CONF_ERROR;
+    }
+
+    olcf->eval_token_secret_index = (ngx_uint_t) index;
+
+    return NGX_CONF_OK;
 }
 
 
@@ -481,6 +600,8 @@ ngx_http_oauth_create_loc_conf(ngx_conf_t *cf)
      */
 
     olcf->enable = NGX_CONF_UNSET;
+    olcf->eval_token_index = NGX_CONF_UNSET_UINT;
+    olcf->eval_token_secret_index = NGX_CONF_UNSET_UINT;
 
     return olcf;
 }
@@ -506,6 +627,11 @@ ngx_http_oauth_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_bitmask_value(conf->signature_methods, 
             prev->signature_methods, SIGNATURE_HMAC_SHA1);
+
+    ngx_conf_merge_uint_value(conf->eval_token_index, prev->eval_token_index,
+            NGX_CONF_UNSET_UINT);
+    ngx_conf_merge_uint_value(conf->eval_token_secret_index, 
+            prev->eval_token_secret_index, NGX_CONF_UNSET_UINT);
 
     return NGX_CONF_OK;
 }

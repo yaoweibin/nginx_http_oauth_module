@@ -16,6 +16,8 @@ typedef struct {
     ngx_str_t authenticated_call_uri;
 
     ngx_uint_t signature_methods;
+    ngx_uint_t eval_token_index;
+    ngx_uint_t eval_token_secret_index;
     ngx_shm_zone_t *session_shm_zone;
 } ngx_http_oauth_loc_conf_t;
 
