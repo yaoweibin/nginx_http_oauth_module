@@ -1,0 +1,24 @@
+ngx_feature="ngx_http_oauth_module"
+ngx_feature_name=
+ngx_feature_run=no
+ngx_feature_incs=
+ngx_feature_path="$ngx_addon_dir/modules $ngx_addon_dir"
+ngx_feature_deps="$ngx_addon_dir/ngx_http_oauth_module.h $ngx_addon_dir/ngx_http_oauth_session.h"
+ngx_oauth_src="$ngx_addon_dir/ngx_http_oauth_module.c $ngx_addon_dir/ngx_http_oauth_session.c"
+ngx_feature_libs="-loauth"
+ngx_feature_test="oauth_gen_nonce();"
+. auto/feature
+
+if [ $ngx_found = yes ]; then
+    CORE_INCS="$CORE_INCS $ngx_feature_path"
+    ngx_addon_name=ngx_http_oauth_module
+    HTTP_MODULES="$HTTP_MODULES ngx_http_oauth_module"
+    NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_feature_deps"
+    NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_oauth_src"
+    CORE_LIBS="$CORE_LIBS -loauth"
+else 
+    cat << END
+    $0: error: the ngx_http_oauth_module addon needs liboauth.
+END
+    exit 1
+fi
