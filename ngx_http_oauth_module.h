@@ -12,12 +12,22 @@ typedef struct {
     ngx_str_t consumer_secret;
 
     ngx_str_t request_token_uri;
+    ngx_str_t call_bakc_uri;
+    ngx_str_t request_auth_uri; //ctx?
+    ngx_str_t callback_confirmed; //ctx?
     ngx_str_t access_token_uri;
     ngx_str_t authenticated_call_uri;
 
     ngx_uint_t signature_methods;
+    ngx_uint_t version;
+
     ngx_uint_t eval_token_index;
+    ngx_uint_t eval_verifier_index;
     ngx_uint_t eval_token_secret_index;
+    ngx_uint_t eval_session_handle_index;
+    ngx_uint_t eval_expries_in_index;
+
+    time_t          session_timeout;
     ngx_shm_zone_t *session_shm_zone;
 } ngx_http_oauth_loc_conf_t;
 

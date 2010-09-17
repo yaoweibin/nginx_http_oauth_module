@@ -1,36 +1,37 @@
 
-#if 0
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include <ngx_http.h>
+#include "ngx_http_oauth_module.h"
 #include "ngx_http_oauth_session.h"
 
+static void ngx_http_oauth_session_rbtree_insert_value(ngx_rbtree_node_t *temp,
+    ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel);
+static ngx_int_t ngx_http_oauth_session_lookup(ngx_http_oauth_loc_conf_t *olcf, 
+        ngx_uint_t hash, u_char *data, size_t len, 
+        ngx_http_oauth_session_node_t **osnp);
+static void ngx_http_oauth_session_expire(ngx_http_oauth_session_ctx_t *ctx,
+        ngx_uint_t n);
 
-static ngx_int_t
+ngx_int_t
 ngx_http_oauth_session_handler(ngx_http_request_t *r)
 {
-    size_t                      len, n;
-    uint32_t                    hash;
-    ngx_int_t                   rc;
-    ngx_uint_t                  excess;
-    ngx_time_t                 *tp;
-    ngx_rbtree_node_t          *node;
-    ngx_http_variable_value_t  *vv;
+    size_t                          len, n;
+    uint32_t                        hash;
+    ngx_int_t                       rc;
+    ngx_rbtree_node_t              *node;
+    ngx_http_variable_value_t      *vv;
+    ngx_http_oauth_loc_conf_t      *olcf;
     ngx_http_oauth_session_ctx_t   *ctx;
-    ngx_http_oauth_session_node_t  *lr;
-    ngx_http_oauth_session_conf_t  *lrcf;
+    ngx_http_oauth_session_node_t  *osn;
 
-    if (r->main->oauth_session_set) {
+    olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
+
+    if (olcf->session_shm_zone == NULL) {
         return NGX_DECLINED;
     }
 
-    lrcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
-
-    if (lrcf->shm_zone == NULL) {
-        return NGX_DECLINED;
-    }
-
-    ctx = lrcf->shm_zone->data;
+    ctx = olcf->session_shm_zone->data;
 
     vv = ngx_http_get_indexed_variable(r, ctx->index);
 
@@ -58,11 +59,11 @@ ngx_http_oauth_session_handler(ngx_http_request_t *r)
 
     ngx_http_oauth_session_expire(ctx, 1);
 
-    rc = ngx_http_oauth_session_lookup(lrcf, hash, vv->data, len, &lr);
+    rc = ngx_http_oauth_session_lookup(olcf, hash, vv->data, len, &osn);
 
-    if (lr) {
-        ngx_queue_remove(&lr->queue);
-        ngx_queue_insert_head(&ctx->sh->queue, &lr->queue);
+    if (osn) {
+        ngx_queue_remove(&osn->queue);
+        ngx_queue_insert_head(&ctx->sh->queue, &osn->queue);
 
         goto done;
     };
@@ -85,18 +86,17 @@ ngx_http_oauth_session_handler(ngx_http_request_t *r)
         }
     }
 
-    lr = (ngx_http_oauth_session_node_t *) &node->color;
+    osn = (ngx_http_oauth_session_node_t *) &node->color;
 
     node->key = hash;
-    lr->len = (u_char) len;
+    osn->len = (u_char) len;
+    osn->expire = olcf->session_timeout;
 
-    tp = ngx_timeofday();
-
-    ngx_memcpy(lr->data, vv->data, len);
+    ngx_memcpy(osn->data, vv->data, len);
 
     ngx_rbtree_insert(&ctx->sh->rbtree, node);
 
-    ngx_queue_insert_head(&ctx->sh->queue, &lr->queue);
+    ngx_queue_insert_head(&ctx->sh->queue, &osn->queue);
 
 done:
 
@@ -111,7 +111,7 @@ ngx_http_oauth_session_rbtree_insert_value(ngx_rbtree_node_t *temp,
     ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel)
 {
     ngx_rbtree_node_t               **p;
-    ngx_http_oauth_session_node_t   *lrn, *lrnt;
+    ngx_http_oauth_session_node_t   *osn, *osnt;
 
     for ( ;; ) {
 
@@ -125,10 +125,10 @@ ngx_http_oauth_session_rbtree_insert_value(ngx_rbtree_node_t *temp,
 
         } else { /* node->key == temp->key */
 
-            lrn = (ngx_http_oauth_session_node_t *) &node->color;
-            lrnt = (ngx_http_oauth_session_node_t *) &temp->color;
+            osn = (ngx_http_oauth_session_node_t *) &node->color;
+            osnt = (ngx_http_oauth_session_node_t *) &temp->color;
 
-            p = (ngx_memn2cmp(lrn->data, lrnt->data, lrn->len, lrnt->len) < 0)
+            p = (ngx_memn2cmp(osn->data, osnt->data, osn->len, osnt->len) < 0)
                 ? &temp->left : &temp->right;
         }
 
@@ -148,18 +148,16 @@ ngx_http_oauth_session_rbtree_insert_value(ngx_rbtree_node_t *temp,
 
 
 static ngx_int_t
-ngx_http_oauth_session_lookup(ngx_http_oauth_conf_t *lrcf, ngx_uint_t hash,
-    u_char *data, size_t len, ngx_http_oauth_session_node_t **lrp)
+ngx_http_oauth_session_lookup(ngx_http_oauth_loc_conf_t *olcf, ngx_uint_t hash,
+    u_char *data, size_t len, ngx_http_oauth_session_node_t **osnp)
 {
-    ngx_int_t                   rc, excess;
-    ngx_time_t                 *tp;
-    ngx_msec_t                  now;
-    ngx_msec_int_t              ms;
-    ngx_rbtree_node_t          *node, *sentinel;
+    time_t                          now;
+    ngx_int_t                       rc;
+    ngx_rbtree_node_t              *node, *sentinel;
     ngx_http_oauth_session_ctx_t   *ctx;
-    ngx_http_oauth_session_node_t  *lr;
+    ngx_http_oauth_session_node_t  *osn;
 
-    ctx = lrcf->shm_zone->data;
+    ctx = olcf->session_shm_zone->data;
 
     node = ctx->sh->rbtree.root;
     sentinel = ctx->sh->rbtree.sentinel;
@@ -179,24 +177,22 @@ ngx_http_oauth_session_lookup(ngx_http_oauth_conf_t *lrcf, ngx_uint_t hash,
         /* hash == node->key */
 
         do {
-            lr = (ngx_http_oauth_session_node_t *) &node->color;
+            osn = (ngx_http_oauth_session_node_t *) &node->color;
 
-            rc = ngx_memn2cmp(data, lr->data, len, (size_t) lr->len);
+            rc = ngx_memn2cmp(data, osn->data, len, (size_t) osn->len);
 
             if (rc == 0) {
 
-                tp = ngx_timeofday();
+                now = ngx_time();
 
-                now = (ngx_msec_t) (tp->sec * 1000 + tp->msec);
-
-                if (now > lr->expire) {
-                    *lrp = NULL;
+                if (now > osn->expire) {
+                    *osnp = NULL;
                     return NGX_OK;
                 }
 
                 /*TODO*/
 
-                *lrp = lr;
+                *osnp = osn;
 
                 return NGX_OK;
             }
@@ -208,7 +204,7 @@ ngx_http_oauth_session_lookup(ngx_http_oauth_conf_t *lrcf, ngx_uint_t hash,
         break;
     }
 
-    *lrp = NULL;
+    *osnp = NULL;
 
     return NGX_OK;
 }
@@ -217,10 +213,10 @@ ngx_http_oauth_session_lookup(ngx_http_oauth_conf_t *lrcf, ngx_uint_t hash,
 static void
 ngx_http_oauth_session_expire(ngx_http_oauth_session_ctx_t *ctx, ngx_uint_t n)
 {
-    time_t                      now;
-    ngx_queue_t                *q;
-    ngx_rbtree_node_t          *node;
-    ngx_http_oauth_session_node_t  *lr;
+    time_t                          now;
+    ngx_queue_t                    *q;
+    ngx_rbtree_node_t              *node;
+    ngx_http_oauth_session_node_t  *osn;
 
     now = ngx_time();
 
@@ -238,10 +234,10 @@ ngx_http_oauth_session_expire(ngx_http_oauth_session_ctx_t *ctx, ngx_uint_t n)
 
         q = ngx_queue_last(&ctx->sh->queue);
 
-        lr = ngx_queue_data(q, ngx_http_oauth_session_node_t, queue);
+        osn = ngx_queue_data(q, ngx_http_oauth_session_node_t, queue);
 
         if (n++ != 0) {
-            if (lr->expire > now) {
+            if (osn->expire > now) {
                 return;
             }
         }
@@ -249,7 +245,7 @@ ngx_http_oauth_session_expire(ngx_http_oauth_session_ctx_t *ctx, ngx_uint_t n)
         ngx_queue_remove(q);
 
         node = (ngx_rbtree_node_t *)
-                   ((u_char *) lr - offsetof(ngx_rbtree_node_t, color));
+                   ((u_char *) osn - offsetof(ngx_rbtree_node_t, color));
 
         ngx_rbtree_delete(&ctx->sh->rbtree, node);
 
@@ -261,10 +257,9 @@ ngx_http_oauth_session_expire(ngx_http_oauth_session_ctx_t *ctx, ngx_uint_t n)
 ngx_int_t
 ngx_http_oauth_session_init_zone(ngx_shm_zone_t *shm_zone, void *data)
 {
-    ngx_http_oauth_session_ctx_t  *octx = data;
-
-    size_t                     len;
+    size_t                         len;
     ngx_http_oauth_session_ctx_t  *ctx;
+    ngx_http_oauth_session_ctx_t  *octx = data;
 
     ctx = shm_zone->data;
 
@@ -308,4 +303,3 @@ ngx_http_oauth_session_init_zone(ngx_shm_zone_t *shm_zone, void *data)
     return NGX_OK;
 }
 
-#endif

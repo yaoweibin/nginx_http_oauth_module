@@ -30,10 +30,14 @@ typedef struct {
 typedef struct {
     ngx_http_oauth_session_shctx_t  *sh;
     ngx_slab_pool_t                 *shpool;
+    ngx_int_t                        index;
+    ngx_str_t                        var;
 } ngx_http_oauth_session_ctx_t;
 
 
-/*ngx_int_t ngx_http_oauth_session_init_zone(ngx_shm_zone_t *shm_zone, */
-/*void *data);*/
+ngx_int_t ngx_http_oauth_session_handler(ngx_http_request_t *r);
+
+ngx_int_t ngx_http_oauth_session_init_zone(ngx_shm_zone_t *shm_zone, 
+        void *data);
 
 #endif /* _NGX_HTTP_OAUTH_SESSION_H_ */

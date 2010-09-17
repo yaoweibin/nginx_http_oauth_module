@@ -65,6 +65,13 @@ static ngx_command_t  ngx_http_oauth_commands[] = {
       0,
       NULL },
 
+    { ngx_string("oauth_session_timeout"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_sec_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_oauth_loc_conf_t, session_timeout),
+      NULL },
+
     { ngx_string("oauth_consumer_key"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
       ngx_conf_set_str_slot,
@@ -193,6 +200,7 @@ ngx_http_oauth_consumer_key_variable(ngx_http_request_t *r,
     return NGX_OK;
 }
 
+
 static ngx_int_t 
 ngx_http_oauth_nonce_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
@@ -201,6 +209,7 @@ ngx_http_oauth_nonce_variable(ngx_http_request_t *r,
 
     return NGX_OK;
 }
+
 
 static ngx_int_t 
 ngx_http_oauth_signed_request_token_uri_variable(ngx_http_request_t *r,
@@ -469,15 +478,17 @@ ngx_http_oauth_eval_variables(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static char *
 ngx_http_oauth_session_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    u_char                    *p;
-    size_t                     size;
-    ngx_str_t                 *value, name, s;
-    ngx_uint_t                 i;
-    ngx_shm_zone_t            *shm_zone;
-    ngx_http_oauth_session_ctx_t  *ctx = NULL;
+    u_char                        *p;
+    size_t                         size;
+    ngx_str_t                     *value, name, s;
+    ngx_uint_t                     i;
+    ngx_shm_zone_t                *shm_zone;
+    ngx_http_oauth_loc_conf_t     *oslcf;
+    ngx_http_oauth_session_ctx_t  *ctx;
 
     value = cf->args->elts;
 
+    ctx = NULL;
     size = 0;
     name.len = 0;
 
@@ -510,6 +521,27 @@ ngx_http_oauth_session_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
+        if (value[i].data[0] == '$') {
+
+            value[i].len--;
+            value[i].data++;
+
+            ctx = ngx_pcalloc(cf->pool, sizeof(ngx_http_oauth_session_ctx_t));
+            if (ctx == NULL) {
+                return NGX_CONF_ERROR;
+            }
+
+            ctx->index = ngx_http_get_variable_index(cf, &value[i]);
+            if (ctx->index == NGX_ERROR) {
+                return NGX_CONF_ERROR;
+            }
+
+            ctx->var = value[i];
+
+            continue;
+        }
+
+
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid parameter \"%V\"", &value[i]);
         return NGX_CONF_ERROR;
@@ -522,10 +554,14 @@ ngx_http_oauth_session_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
-    ctx = ngx_pcalloc(cf->pool, sizeof(ngx_http_oauth_session_ctx_t));
     if (ctx == NULL) {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                           "no variable is defined for auth_session_zone \"%V\"",
+                           &cmd->name);
         return NGX_CONF_ERROR;
     }
+
+    oslcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_oauth_module);
 
     shm_zone = ngx_shared_memory_add(cf, &name, size,
                                      &ngx_http_oauth_module);
@@ -533,8 +569,10 @@ ngx_http_oauth_session_zone(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
-    /*shm_zone->init = ngx_http_oauth_session_init_zone;*/
+    shm_zone->init = ngx_http_oauth_session_init_zone;
     shm_zone->data = ctx;
+
+    oslcf->session_shm_zone = shm_zone;
 
     return NGX_CONF_OK;
 }
@@ -562,17 +600,17 @@ ngx_http_oauth_add_variables(ngx_conf_t *cf)
 static ngx_int_t
 ngx_http_oauth_init(ngx_conf_t *cf)
 {
-    /*ngx_http_handler_pt        *h;*/
-    /*ngx_http_core_main_conf_t  *cmcf;*/
+    ngx_http_handler_pt        *h;
+    ngx_http_core_main_conf_t  *cmcf;
 
-    /*cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);*/
+    cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
 
-    /*h = ngx_array_push(&cmcf->phases[NGX_HTTP_CONTENT_PHASE].handlers);*/
-    /*if (h == NULL) {*/
-    /*return NGX_ERROR;*/
-    /*}*/
+    h = ngx_array_push(&cmcf->phases[NGX_HTTP_PREACCESS_PHASE].handlers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
 
-    /**h = ngx_http_oauth_handler;*/
+    *h = ngx_http_oauth_session_handler;
 
     return NGX_OK;
 }
@@ -602,6 +640,7 @@ ngx_http_oauth_create_loc_conf(ngx_conf_t *cf)
     olcf->enable = NGX_CONF_UNSET;
     olcf->eval_token_index = NGX_CONF_UNSET_UINT;
     olcf->eval_token_secret_index = NGX_CONF_UNSET_UINT;
+    olcf->session_timeout = NGX_CONF_UNSET;
 
     return olcf;
 }
@@ -632,6 +671,9 @@ ngx_http_oauth_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
             NGX_CONF_UNSET_UINT);
     ngx_conf_merge_uint_value(conf->eval_token_secret_index, 
             prev->eval_token_secret_index, NGX_CONF_UNSET_UINT);
+
+    ngx_conf_merge_sec_value(conf->session_timeout, prev->session_timeout, 600);
+
 
     return NGX_CONF_OK;
 }
