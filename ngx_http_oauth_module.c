@@ -45,14 +45,14 @@ static ngx_conf_bitmask_t  ngx_http_oauth_signatures[] = {
 static ngx_command_t  ngx_http_oauth_commands[] = {
 
     { ngx_string("oauth"),
-      NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
       ngx_conf_set_flag_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_oauth_loc_conf_t, enable),
       NULL },
 
     { ngx_string("oauth_eval_variables"),
-      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE23,
       ngx_http_oauth_eval_variables,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
@@ -91,6 +91,20 @@ static ngx_command_t  ngx_http_oauth_commands[] = {
       ngx_conf_set_str_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_oauth_loc_conf_t, request_token_uri),
+      NULL },
+
+    { ngx_string("oauth_call_back_uri"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_oauth_loc_conf_t, call_back_uri),
+      NULL },
+
+    { ngx_string("oauth_request_auth_uri"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_oauth_loc_conf_t, request_auth_uri),
       NULL },
 
     { ngx_string("oauth_access_token_uri"),
@@ -191,6 +205,11 @@ ngx_http_oauth_consumer_key_variable(ngx_http_request_t *r,
 
     olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
 
+    if (!olcf->enable) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
+
     v->len = olcf->consumer_key.len;
     v->valid = 1;
     v->no_cacheable = 0;
@@ -220,6 +239,14 @@ ngx_http_oauth_signed_request_token_uri_variable(ngx_http_request_t *r,
     ngx_http_oauth_loc_conf_t  *olcf;
 
     olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
+
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "oauth enable: \"%d\"", olcf->enable);
+
+    if (!olcf->enable) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
 
     req_url = (u_char *) oauth_sign_url2((char *)olcf->request_token_uri.data, 
             NULL, OA_HMAC, NULL, 
@@ -269,12 +296,44 @@ static ngx_int_t
 ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
 {
-    u_char                     *req_url;
-    ngx_str_t                   url, t_key, t_secret;
+    u_char                     *req_url, *access_uri, *mark;
+    ngx_str_t                   url, verifier, t_key, t_secret;
     ngx_http_oauth_loc_conf_t  *olcf;
     ngx_http_variable_value_t  *vv;
 
     olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
+
+    if (!olcf->enable) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
+
+    /*need verifier variable*/
+    if (olcf->eval_verifier_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->eval_token_index);
+
+        verifier.len = vv->len;
+        verifier.data = vv->data;
+
+        access_uri = ngx_pcalloc(r->pool, 
+                olcf->access_token_uri.len + 1 + verifier.len + 1);
+        if (access_uri == NULL ) {
+            v->not_found = 1;
+            return NGX_OK;
+        }
+
+        if (ngx_strchr(olcf->access_token_uri.data, '?') == NULL) {
+            mark = (u_char *)"&";
+        }
+        else {
+            mark = (u_char *)"?";
+        }
+
+        ngx_sprintf(access_uri, "%V%s%V", &olcf->access_token_uri, mark, &verifier);
+    }
+    else {
+        access_uri = olcf->access_token_uri.data;
+    }
 
     if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
         v->not_found = 1;
@@ -300,7 +359,7 @@ ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     t_secret.data = vv->data;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "oauth_token: \"%V\"", &t_secret);
+                   "oauth_secret: \"%V\"", &t_secret);
 
     req_url = (u_char *) oauth_sign_url2((char *)olcf->access_token_uri.data, 
             NULL, OA_HMAC, NULL, 
@@ -343,6 +402,11 @@ ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
 
     olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
 
+    if (!olcf->enable) {
+        v->not_found = 1;
+        return NGX_OK;
+    }
+
     if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
         v->not_found = 1;
         return NGX_OK;
@@ -366,7 +430,7 @@ ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
     t_secret.data = vv->data;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "oauth_token: \"%V\"", &t_secret);
+                   "oauth_secret: \"%V\"", &t_secret);
 
     req_url = (u_char *) oauth_sign_url2((char *)olcf->authenticated_call_uri.data, 
             NULL, OA_HMAC, NULL, 
@@ -470,6 +534,31 @@ ngx_http_oauth_eval_variables(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     olcf->eval_token_secret_index = (ngx_uint_t) index;
+
+    if (cf->args->nelts < 4) {
+        return NGX_CONF_OK;
+    }
+
+    if (value[3].data[0] != '$') {
+        ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                "invalid variable name \"%V\"", &value[3]);
+        return NGX_CONF_ERROR;
+    }
+
+    value[3].len--;
+    value[3].data++;
+
+    v = ngx_http_add_variable(cf, &value[3], NGX_HTTP_VAR_CHANGEABLE);
+    if (v == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    index = ngx_http_get_variable_index(cf, &value[3]);
+    if (index == NGX_ERROR) {
+        return NGX_CONF_ERROR;
+    }
+
+    olcf->eval_verifier_index = (ngx_uint_t) index;
 
     return NGX_CONF_OK;
 }
@@ -632,6 +721,8 @@ ngx_http_oauth_create_loc_conf(ngx_conf_t *cf)
      *     olcf->consumer_key =  {0, NULL};
      *     olcf->consumer_secret =  {0, NULL};
      *     olcf->request_token_uri =  {0, NULL};
+     *     olcf->call_back_uri =  {0, NULL};
+     *     olcf->request_auth_uri =  {0, NULL};
      *     olcf->access_toke_uri =  {0, NULL};
      *     olcf->authenticated_call_uri =  {0, NULL};
      *     olcf->signature_methods =  0;
@@ -640,6 +731,7 @@ ngx_http_oauth_create_loc_conf(ngx_conf_t *cf)
     olcf->enable = NGX_CONF_UNSET;
     olcf->eval_token_index = NGX_CONF_UNSET_UINT;
     olcf->eval_token_secret_index = NGX_CONF_UNSET_UINT;
+    olcf->eval_verifier_index = NGX_CONF_UNSET_UINT;
     olcf->session_timeout = NGX_CONF_UNSET;
 
     return olcf;
@@ -659,6 +751,10 @@ ngx_http_oauth_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_str_value(conf->request_token_uri, 
             prev->request_token_uri, "");
+    ngx_conf_merge_str_value(conf->call_back_uri, 
+            prev->call_back_uri, "");
+    ngx_conf_merge_str_value(conf->request_auth_uri, 
+            prev->request_auth_uri, "");
     ngx_conf_merge_str_value(conf->access_token_uri, 
             prev->access_token_uri, "");
     ngx_conf_merge_str_value(conf->authenticated_call_uri, 
@@ -671,6 +767,8 @@ ngx_http_oauth_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
             NGX_CONF_UNSET_UINT);
     ngx_conf_merge_uint_value(conf->eval_token_secret_index, 
             prev->eval_token_secret_index, NGX_CONF_UNSET_UINT);
+    ngx_conf_merge_uint_value(conf->eval_verifier_index, 
+            prev->eval_verifier_index, NGX_CONF_UNSET_UINT);
 
     ngx_conf_merge_sec_value(conf->session_timeout, prev->session_timeout, 600);
 

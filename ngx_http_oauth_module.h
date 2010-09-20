@@ -12,7 +12,7 @@ typedef struct {
     ngx_str_t consumer_secret;
 
     ngx_str_t request_token_uri;
-    ngx_str_t call_bakc_uri;
+    ngx_str_t call_back_uri;
     ngx_str_t request_auth_uri; //ctx?
     ngx_str_t callback_confirmed; //ctx?
     ngx_str_t access_token_uri;
@@ -22,8 +22,8 @@ typedef struct {
     ngx_uint_t version;
 
     ngx_uint_t eval_token_index;
-    ngx_uint_t eval_verifier_index;
     ngx_uint_t eval_token_secret_index;
+    ngx_uint_t eval_verifier_index;
     ngx_uint_t eval_session_handle_index;
     ngx_uint_t eval_expries_in_index;
 
