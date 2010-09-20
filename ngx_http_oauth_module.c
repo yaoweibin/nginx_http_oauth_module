@@ -6,7 +6,7 @@
 #include "ngx_http_oauth_session.h"
 #include <oauth.h>
 
-static char * ngx_http_oauth_eval_variables(ngx_conf_t *cf, ngx_command_t *cmd,
+static char * ngx_http_oauth_variables(ngx_conf_t *cf, ngx_command_t *cmd,
         void *conf);
 static char *ngx_http_oauth_session_zone(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf);
@@ -51,9 +51,9 @@ static ngx_command_t  ngx_http_oauth_commands[] = {
       offsetof(ngx_http_oauth_loc_conf_t, enable),
       NULL },
 
-    { ngx_string("oauth_eval_variables"),
-      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE23,
-      ngx_http_oauth_eval_variables,
+    { ngx_string("oauth_variables"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_2MORE,
+      ngx_http_oauth_variables,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
       NULL },
@@ -234,9 +234,10 @@ static ngx_int_t
 ngx_http_oauth_signed_request_token_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
 {
-    u_char                     *req_url;
+    u_char                     *req_url, *proxy_uri;
     ngx_str_t                   url;
     ngx_http_oauth_loc_conf_t  *olcf;
+    ngx_http_variable_value_t  *vv;
 
     olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
 
@@ -244,11 +245,28 @@ ngx_http_oauth_signed_request_token_uri_variable(ngx_http_request_t *r,
                    "oauth enable: \"%d\"", olcf->enable);
 
     if (!olcf->enable) {
-        v->not_found = 1;
-        return NGX_OK;
+        goto not_found;
     }
 
-    req_url = (u_char *) oauth_sign_url2((char *)olcf->request_token_uri.data, 
+    if (olcf->proxy_uri_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->proxy_uri_index);
+
+        if (vv->len == 0) {
+            goto not_found;
+        }
+
+        proxy_uri = ngx_pcalloc(r->pool, vv->len + 1);
+        if (proxy_uri == NULL) {
+            goto not_found;
+        }
+
+        ngx_memcpy(proxy_uri, vv->data, vv->len);
+    }
+    else {
+        goto not_found;
+    }
+
+    req_url = (u_char *) oauth_sign_url2((char *)proxy_uri, 
             NULL, OA_HMAC, NULL, 
             (char *)olcf->consumer_key.data, 
             (char *)olcf->consumer_secret.data, NULL, NULL);
@@ -256,8 +274,11 @@ ngx_http_oauth_signed_request_token_uri_variable(ngx_http_request_t *r,
     url.len = ngx_strlen(req_url);
     url.data = ngx_palloc(r->pool, url.len);
     if (url.data == NULL) {
-        v->not_found = 1;
-        return NGX_OK;
+        if (req_url) {
+            free(req_url);
+        }
+
+        goto not_found;
     }
 
     ngx_memcpy(url.data, req_url, url.len);
@@ -272,6 +293,11 @@ ngx_http_oauth_signed_request_token_uri_variable(ngx_http_request_t *r,
     v->not_found = 0;
     v->data = url.data;
 
+    return NGX_OK;
+
+not_found:
+
+    v->not_found = 1;
     return NGX_OK;
 }
 
@@ -296,51 +322,40 @@ static ngx_int_t
 ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
 {
-    u_char                     *req_url, *access_uri, *mark;
-    ngx_str_t                   url, verifier, t_key, t_secret;
+    u_char                     *req_url, *proxy_uri;
+    ngx_str_t                   url, t_key, t_secret;
     ngx_http_oauth_loc_conf_t  *olcf;
     ngx_http_variable_value_t  *vv;
 
     olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
 
     if (!olcf->enable) {
-        v->not_found = 1;
-        return NGX_OK;
+        goto not_found;
     }
 
-    /*need verifier variable*/
-    if (olcf->eval_verifier_index != NGX_CONF_UNSET_UINT) {
-        vv = ngx_http_get_indexed_variable(r, olcf->eval_token_index);
+    if (olcf->proxy_uri_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->proxy_uri_index);
 
-        verifier.len = vv->len;
-        verifier.data = vv->data;
-
-        access_uri = ngx_pcalloc(r->pool, 
-                olcf->access_token_uri.len + 1 + verifier.len + 1);
-        if (access_uri == NULL ) {
-            v->not_found = 1;
-            return NGX_OK;
+        if (vv->len == 0) {
+            goto not_found;
         }
 
-        if (ngx_strchr(olcf->access_token_uri.data, '?') == NULL) {
-            mark = (u_char *)"&";
-        }
-        else {
-            mark = (u_char *)"?";
+        proxy_uri = ngx_pcalloc(r->pool, vv->len + 1);
+        if (proxy_uri == NULL) {
+            goto not_found;
         }
 
-        ngx_sprintf(access_uri, "%V%s%V", &olcf->access_token_uri, mark, &verifier);
+        ngx_memcpy(proxy_uri, vv->data, vv->len);
     }
     else {
-        access_uri = olcf->access_token_uri.data;
+        goto not_found;
     }
 
-    if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
-        v->not_found = 1;
-        return NGX_OK;
+    if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+        goto not_found;
     }
 
-    vv = ngx_http_get_indexed_variable(r, olcf->eval_token_index);
+    vv = ngx_http_get_indexed_variable(r, olcf->token_index);
 
     t_key.len = vv->len;
     t_key.data = vv->data;
@@ -348,12 +363,11 @@ ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "oauth_token: \"%V\"", &t_key);
 
-    if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
-        v->not_found = 1;
-        return NGX_OK;
+    if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+        goto not_found;
     }
 
-    vv = ngx_http_get_indexed_variable(r, olcf->eval_token_secret_index);
+    vv = ngx_http_get_indexed_variable(r, olcf->token_secret_index);
 
     t_secret.len = vv->len;
     t_secret.data = vv->data;
@@ -361,7 +375,7 @@ ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "oauth_secret: \"%V\"", &t_secret);
 
-    req_url = (u_char *) oauth_sign_url2((char *)olcf->access_token_uri.data, 
+    req_url = (u_char *) oauth_sign_url2((char *)proxy_uri, 
             NULL, OA_HMAC, NULL, 
             (char *)olcf->consumer_key.data, 
             (char *)olcf->consumer_secret.data, 
@@ -371,8 +385,11 @@ ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     url.len = ngx_strlen(req_url);
     url.data = ngx_palloc(r->pool, url.len);
     if (url.data == NULL) {
-        v->not_found = 1;
-        return NGX_OK;
+        if (req_url) {
+            free(req_url);
+        }
+
+        goto not_found;
     }
 
     ngx_memcpy(url.data, req_url, url.len);
@@ -388,6 +405,11 @@ ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     v->data = url.data;
 
     return NGX_OK;
+
+not_found:
+
+    v->not_found = 1;
+    return NGX_OK;
 }
 
 
@@ -395,7 +417,7 @@ static ngx_int_t
 ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
 {
-    u_char                     *req_url;
+    u_char                     *req_url, *proxy_uri;
     ngx_str_t                   url, t_key, t_secret;
     ngx_http_oauth_loc_conf_t  *olcf;
     ngx_http_variable_value_t  *vv;
@@ -407,24 +429,40 @@ ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
         return NGX_OK;
     }
 
-    if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
-        v->not_found = 1;
-        return NGX_OK;
+    if (olcf->proxy_uri_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->proxy_uri_index);
+
+        if (vv->len == 0) {
+            goto not_found;
+        }
+
+        proxy_uri = ngx_pcalloc(r->pool, vv->len + 1);
+        if (proxy_uri == NULL) {
+            goto not_found;
+        }
+
+        ngx_memcpy(proxy_uri, vv->data, vv->len);
+    }
+    else {
+        goto not_found;
     }
 
-    vv = ngx_http_get_indexed_variable(r, olcf->eval_token_index);
+    if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+        goto not_found;
+    }
+
+    vv = ngx_http_get_indexed_variable(r, olcf->token_index);
     t_key.len = vv->len;
     t_key.data = vv->data;
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "oauth_token: \"%V\"", &t_key);
 
-    if (olcf->eval_token_index == NGX_CONF_UNSET_UINT) {
-        v->not_found = 1;
-        return NGX_OK;
+    if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+        goto not_found;
     }
 
-    vv = ngx_http_get_indexed_variable(r, olcf->eval_token_secret_index);
+    vv = ngx_http_get_indexed_variable(r, olcf->token_secret_index);
 
     t_secret.len = vv->len;
     t_secret.data = vv->data;
@@ -432,7 +470,7 @@ ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "oauth_secret: \"%V\"", &t_secret);
 
-    req_url = (u_char *) oauth_sign_url2((char *)olcf->authenticated_call_uri.data, 
+    req_url = (u_char *) oauth_sign_url2((char *)proxy_uri, 
             NULL, OA_HMAC, NULL, 
             (char *)olcf->consumer_key.data, 
             (char *)olcf->consumer_secret.data, 
@@ -442,8 +480,11 @@ ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
     url.len = ngx_strlen(req_url);
     url.data = ngx_palloc(r->pool, url.len);
     if (url.data == NULL) {
-        v->not_found = 1;
-        return NGX_OK;
+        if (req_url) {
+            free(req_url);
+        }
+
+        goto not_found;
     }
 
     ngx_memcpy(url.data, req_url, url.len);
@@ -457,6 +498,21 @@ ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
     v->no_cacheable = 0;
     v->not_found = 0;
     v->data = url.data;
+
+    return NGX_OK;
+
+not_found:
+
+    v->not_found = 1;
+    return NGX_OK;
+}
+
+
+static ngx_int_t 
+ngx_http_oauth_dummy_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    v->not_found = 1;
 
     return NGX_OK;
 }
@@ -483,7 +539,7 @@ ngx_http_oauth_timestamp_variable(ngx_http_request_t *r,
 
 
 static char *
-ngx_http_oauth_eval_variables(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
+ngx_http_oauth_variables(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
     ngx_str_t                 *value;
     ngx_int_t                  index;
@@ -512,7 +568,7 @@ ngx_http_oauth_eval_variables(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
-    olcf->eval_token_index = (ngx_uint_t) index;
+    olcf->token_index = (ngx_uint_t) index;
 
     if (value[2].data[0] != '$') {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
@@ -533,7 +589,7 @@ ngx_http_oauth_eval_variables(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
-    olcf->eval_token_secret_index = (ngx_uint_t) index;
+    olcf->token_secret_index = (ngx_uint_t) index;
 
     if (cf->args->nelts < 4) {
         return NGX_CONF_OK;
@@ -552,13 +608,14 @@ ngx_http_oauth_eval_variables(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     if (v == NULL) {
         return NGX_CONF_ERROR;
     }
+    v->get_handler = ngx_http_oauth_dummy_variable;
 
     index = ngx_http_get_variable_index(cf, &value[3]);
     if (index == NGX_ERROR) {
         return NGX_CONF_ERROR;
     }
 
-    olcf->eval_verifier_index = (ngx_uint_t) index;
+    olcf->proxy_uri_index = (ngx_uint_t) index;
 
     return NGX_CONF_OK;
 }
@@ -729,9 +786,10 @@ ngx_http_oauth_create_loc_conf(ngx_conf_t *cf)
      */
 
     olcf->enable = NGX_CONF_UNSET;
-    olcf->eval_token_index = NGX_CONF_UNSET_UINT;
-    olcf->eval_token_secret_index = NGX_CONF_UNSET_UINT;
-    olcf->eval_verifier_index = NGX_CONF_UNSET_UINT;
+    olcf->token_index = NGX_CONF_UNSET_UINT;
+    olcf->token_secret_index = NGX_CONF_UNSET_UINT;
+    olcf->verifier_index = NGX_CONF_UNSET_UINT;
+    olcf->proxy_uri_index = NGX_CONF_UNSET_UINT;
     olcf->session_timeout = NGX_CONF_UNSET;
 
     return olcf;
@@ -763,12 +821,14 @@ ngx_http_oauth_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_bitmask_value(conf->signature_methods, 
             prev->signature_methods, SIGNATURE_HMAC_SHA1);
 
-    ngx_conf_merge_uint_value(conf->eval_token_index, prev->eval_token_index,
+    ngx_conf_merge_uint_value(conf->token_index, prev->token_index,
             NGX_CONF_UNSET_UINT);
-    ngx_conf_merge_uint_value(conf->eval_token_secret_index, 
-            prev->eval_token_secret_index, NGX_CONF_UNSET_UINT);
-    ngx_conf_merge_uint_value(conf->eval_verifier_index, 
-            prev->eval_verifier_index, NGX_CONF_UNSET_UINT);
+    ngx_conf_merge_uint_value(conf->token_secret_index, 
+            prev->token_secret_index, NGX_CONF_UNSET_UINT);
+    ngx_conf_merge_uint_value(conf->verifier_index, 
+            prev->verifier_index, NGX_CONF_UNSET_UINT);
+    ngx_conf_merge_uint_value(conf->proxy_uri_index, 
+            prev->proxy_uri_index, NGX_CONF_UNSET_UINT);
 
     ngx_conf_merge_sec_value(conf->session_timeout, prev->session_timeout, 600);
 
