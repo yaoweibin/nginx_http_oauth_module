@@ -34,8 +34,8 @@ typedef struct {
 } ngx_http_oauth_loc_conf_t;
 
 typedef struct {
-    ngx_str_t oauth_token;
-    ngx_str_t oauth_token_secret;
+    ngx_str_t token;
+    ngx_str_t token_secret;
 } ngx_http_oauth_ctx_t;
 
 extern ngx_module_t  ngx_http_oauth_module;

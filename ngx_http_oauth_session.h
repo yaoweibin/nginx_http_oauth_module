@@ -15,9 +15,13 @@
 typedef struct {
     ngx_rbtree_node_t              node;
     ngx_queue_t                    queue;
-    u_short                        len;
     ngx_uint_t                     state;
     time_t                         expire;
+    u_short                        name_len;
+    u_short                        token_start;
+    u_short                        token_len;
+    u_short                        token_secret_start;
+    u_short                        token_secret_len;
     u_char                         data[1];
 } ngx_http_oauth_session_node_t;
 
@@ -34,8 +38,9 @@ typedef struct {
     ngx_str_t                        var;
 } ngx_http_oauth_session_ctx_t;
 
-
-ngx_int_t ngx_http_oauth_session_handler(ngx_http_request_t *r);
+ngx_int_t ngx_http_oauth_store_session_by_name(ngx_http_request_t *r,
+        ngx_str_t *token, ngx_str_t *secret);
+ngx_int_t ngx_http_oauth_find_session_by_name(ngx_http_request_t *r);
 
 ngx_int_t ngx_http_oauth_session_init_zone(ngx_shm_zone_t *shm_zone, 
         void *data);
