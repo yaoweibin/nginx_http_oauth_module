@@ -77,13 +77,6 @@ static ngx_command_t  ngx_http_oauth_commands[] = {
       0,
       NULL },
 
-    { ngx_string("oauth_session_timeout"),
-      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
-      ngx_conf_set_sec_slot,
-      NGX_HTTP_LOC_CONF_OFFSET,
-      offsetof(ngx_http_oauth_loc_conf_t, session_timeout),
-      NULL },
-
     { ngx_string("oauth_consumer_key"),
       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
       ngx_conf_set_str_slot,
@@ -850,6 +843,19 @@ ngx_http_oauth_session_store(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             continue;
         }
 
+        if (ngx_strncmp(value[i].data, "expire=", 7) == 0) {
+
+            s.len = value[i].len - 7;
+            s.data = value[i].data + 7;
+
+            olcf->session_expire = ngx_parse_time(&s, 1);
+            if (olcf->session_expire == (time_t) NGX_ERROR) {
+                return NGX_CONF_ERROR;
+            }
+
+            continue;
+        }
+
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid parameter \"%V\"", &value[i]);
         return NGX_CONF_ERROR;
@@ -939,7 +945,7 @@ ngx_http_oauth_create_loc_conf(ngx_conf_t *cf)
     olcf->token_secret_index = NGX_CONF_UNSET_UINT;
     olcf->verifier_index = NGX_CONF_UNSET_UINT;
     olcf->proxy_uri_index = NGX_CONF_UNSET_UINT;
-    olcf->session_timeout = NGX_CONF_UNSET;
+    olcf->session_expire = NGX_CONF_UNSET;
 
     return olcf;
 }
@@ -979,8 +985,7 @@ ngx_http_oauth_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     ngx_conf_merge_uint_value(conf->proxy_uri_index, 
             prev->proxy_uri_index, NGX_CONF_UNSET_UINT);
 
-    ngx_conf_merge_sec_value(conf->session_timeout, prev->session_timeout, 600);
-
+    ngx_conf_merge_sec_value(conf->session_expire, prev->session_expire, 365 * 24 * 60 * 60);
 
     return NGX_CONF_OK;
 }

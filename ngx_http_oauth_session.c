@@ -5,6 +5,7 @@
 #include "ngx_http_oauth_module.h"
 #include "ngx_http_oauth_session.h"
 
+
 static void ngx_http_oauth_session_rbtree_insert_value(ngx_rbtree_node_t *temp,
     ngx_rbtree_node_t *node, ngx_rbtree_node_t *sentinel);
 static ngx_int_t ngx_http_oauth_session_lookup(ngx_http_oauth_loc_conf_t *olcf, 
@@ -66,6 +67,7 @@ ngx_http_oauth_store_session_by_name(ngx_http_request_t *r, ngx_str_t *token,
     rc = ngx_http_oauth_session_lookup(olcf, hash, vv->data, len, &osn);
 
     /* Find, delete the old one */
+
     if (osn) {
         ngx_http_oauth_session_delete(ctx, osn);
     };
@@ -78,7 +80,6 @@ ngx_http_oauth_store_session_by_name(ngx_http_request_t *r, ngx_str_t *token,
 
     node = ngx_slab_alloc_locked(ctx->shpool, n);
     if (node == NULL) {
-
         ngx_http_oauth_session_expire(ctx, 0);
 
         node = ngx_slab_alloc_locked(ctx->shpool, n);
@@ -96,7 +97,7 @@ ngx_http_oauth_store_session_by_name(ngx_http_request_t *r, ngx_str_t *token,
 
     node->key = hash;
     osn->name_len = (u_char) len;
-    osn->expire = olcf->session_timeout;
+    osn->expire = ngx_time() + olcf->session_expire;
 
     ngx_memcpy(osn->data, vv->data, len);
 
@@ -160,7 +161,7 @@ ngx_http_oauth_find_session_by_name(ngx_http_request_t *r)
         return NGX_DECLINED;
     }
 
-    ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "find session: %*s", len, vv->data);
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "find session: %*s", len, vv->data);
 
     hash = ngx_crc32_short(vv->data, len);
 
@@ -294,11 +295,6 @@ ngx_http_oauth_session_lookup(ngx_http_oauth_loc_conf_t *olcf, ngx_uint_t hash,
 
                 /*TODO*/
 
-                /*if (now > osn->expire) {*/
-                /**osnp = NULL;*/
-                /*return NGX_OK;*/
-                /*}*/
-
                 *osnp = osn;
 
                 return NGX_OK;
@@ -361,9 +357,9 @@ ngx_http_oauth_session_expire(ngx_http_oauth_session_ctx_t *ctx, ngx_uint_t n)
         osn = ngx_queue_data(q, ngx_http_oauth_session_node_t, queue);
 
         if (n++ != 0) {
-            /*if (osn->expire > now) {*/
+            if (now < osn->expire) {
                 return;
-                /*}*/
+            }
         }
 
         ngx_queue_remove(q);
