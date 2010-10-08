@@ -28,9 +28,6 @@ typedef struct {
     ngx_uint_t verifier_index;
     ngx_uint_t session_handle_index;
     ngx_uint_t expries_in_index;
-
-    time_t          session_expire;
-    ngx_shm_zone_t *session_shm_zone;
 } ngx_http_oauth_loc_conf_t;
 
 typedef struct {

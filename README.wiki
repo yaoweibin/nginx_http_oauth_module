@@ -14,55 +14,6 @@ We need your help! If you find this module useful and/or interesting, please con
 
 http {
 
-	server {
-		listen       1982;
-		server_name  localhost;
-
-		oauth_consumer_key key;
-		oauth_consumer_secret secret;
-		oauth_variables $oauth_token $oauth_token_secret $proxy_uri;
-		oauth_session_zone $test_name zone=test:10m;
-
-		#two step oauth
-		location  /{
-			set $test_name yaoweibin;
-			oauth_session_store zone=test;
-
-			if ($oauth_has_valid_session = "0") {
-				rewrite .* /session;
-			}
-
-			set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo%20bar&bar=baz";
-			proxy_pass $oauth_signed_authenticated_call_uri;
-		}
-
-		location /session {
-			oauth on;
-			oauth_session_store zone=test;
-			set $test_name yaoweibin;
-
-			eval_override_content_type application/x-www-form-urlencoded;
-			eval $oauth_token $oauth_token_secret {
-				set $proxy_uri "http://term.ie/oauth/example/request_token.php";
-				proxy_pass $oauth_signed_request_token_uri;
-			}
-
-			eval $oauth_token $oauth_token_secret {
-				set $proxy_uri "http://term.ie/oauth/example/access_token.php";
-				proxy_pass $oauth_signed_access_token_uri;
-			}
-
-			if ($oauth_token = "") {
-				return 403;
-			}
-
-			if ($oauth_token_secret = "") {
-				return 403;
-			}
-
-			#rewrite ^(.*)$ $request_uri last;
-		}
-	}
 
 }
 

@@ -3,8 +3,8 @@ ngx_feature_name=
 ngx_feature_run=no
 ngx_feature_incs=
 ngx_feature_path="$ngx_addon_dir/modules $ngx_addon_dir"
-ngx_feature_deps="$ngx_addon_dir/ngx_http_oauth_module.h $ngx_addon_dir/ngx_http_oauth_session.h"
-ngx_oauth_src="$ngx_addon_dir/ngx_http_oauth_module.c $ngx_addon_dir/ngx_http_oauth_session.c"
+ngx_feature_deps="$ngx_addon_dir/ngx_http_oauth_module.h"
+ngx_oauth_src="$ngx_addon_dir/ngx_http_oauth_module.c"
 ngx_feature_libs="-loauth"
 ngx_feature_test="oauth_gen_nonce();"
 . auto/feature
