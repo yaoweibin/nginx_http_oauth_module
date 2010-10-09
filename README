@@ -12,24 +12,197 @@ Status
 Synopsis
     http {
 
+        server {
+            listen       80;
+            server_name  _ localhost example.cn;
+
+            oauth_consumer_key 190008619;
+            oauth_consumer_secret 6054e105136d8eb353c8af2793f0a67;
+            oauth_variables $oauth_token $oauth_token_secret $proxy_uri;
+            session_zone $binary_remote_addr zone=test:10M;
+            session_zone $user_id zone=sina:10M;
+
+            location / {
+
+                set $user_id 1669013120;
+
+                if ($user_id = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /get_local_session last;
+
+                return 404;
+            }
+
+            location /get_local_session {
+                session_get zone=sina $oauth_token $oauth_token_secret;
+
+                if ($oauth_token = "") {
+                    rewrite (.*) /session last;
+                }
+
+                if ($oauth_token_secret = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /oauth_proxy last;
+            }
+
+            location /oauth_proxy {
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                set $proxy_uri http://api.t.sina.com.cn$request_uri;
+                proxy_pass $oauth_signed_authenticated_call_uri;
+            }
+
+            location /session {
+                eval_override_content_type application/x-www-form-urlencoded;
+                eval $oauth_token $oauth_token_secret {
+                    set $proxy_uri "http://api.t.sina.com.cn/oauth/request_token";
+                    proxy_pass $oauth_signed_request_token_uri;
+                }
+
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                session_store zone=test $oauth_token $oauth_token_secret;
+
+                #redirect to the authorize page
+                add_header Location http://api.t.sina.com.cn/oauth/authorize?oauth_token=$oauth_token&oauth_callback=http://yaoweibin.cn/ready&display=page;
+
+                return 302;
+            }
+
+            location /ready {
+                eval_override_content_type application/x-www-form-urlencoded;
+
+                eval $oauth_token $oauth_token_secret $user_id {
+                    set $proxy_uri http://api.t.sina.com.cn/oauth/access_token?oauth_verifier=$arg_oauth_verifier;
+                    set $oauth_token $arg_oauth_token;
+
+                    session_get zone=test $session_oauth_token $oauth_token_secret;
+
+                    #proxy_method POST;
+                    proxy_pass $oauth_signed_access_token_uri;
+                }
+
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                #save the access_token and secret
+                session_store zone=sina $oauth_token $oauth_token_secret expire=1d;
+
+                add_header Location http://example.cn/statuses/friends_timeline.xml?count=20;
+
+                return 302;
+            }
+            }
     }
 
 Description
     Add the support oauth client with Nginx.
 
 Directives
-  oauth
-    syntax: **
+  oauth_consumer_key
+    syntax:*oauth_consumer_key key_string*
 
-    default: **
+    default: *none*
 
-    context: **
+    context: *http, server, location*
 
-    description:
+    description: The string of consumer key.
+
+  oauth_consumer_secret
+    syntax:*oauth_consumer_secret secret_string*
+
+    default: *none*
+
+    context: *http, server, location*
+
+    description: The string of consumer secret.
+
+  oauth_signature_method
+    syntax:'oauth_signature_method HMAC-SHA1 | PLAINTEXT | RSA-SHA1''
+
+    default: *oauth_signature_method HMAC-SHA1*
+
+    context: *http, server, location*
+
+    description: The oauth signature method.
+
+  oauth_variables
+    syntax:'oauth_variables $oauth_token $oauth_token_secret $proxy_uri''
+
+    default: *none*
+
+    context: *http, server, location*
+
+    description: The variables used in the protocol exchanging.
+
+Variables
+  $oauth_signed_request_token_uri
+    description: You can get the request token from this uri. The base uri
+    is the variable of $proxy_uri. This request token uri is output like
+    this:
+    http://api.t.sina.com.cn/oauth/request_token?oauth_consumer_key=19000861
+    9&oauth_nonce=akQcG8ydQ77lftD23F&oauth_signature_method=HMAC-SHA1&oauth_
+    timestamp=1286614404&oauth_version=1.0&oauth_signature=NqchRk%2F9wfwNybQ
+    ovV0j8QofCww%3D
+
+    The signature is constructed by $proxy_uri, oauth_consumer_key and
+    oauth_consumer_secret etc. See rfc5849 for detail.
+
+  $oauth_signed_access_token_uri
+    description: You can get the access token from this uri. The base uri is
+    the variable of $proxy_uri. This access token uri is output like this:
+    http://api.t.sina.com.cn/oauth/access_token?oauth_consumer_key=190008619
+    &oauth_nonce=WiVUancz2jFbdhqfDxdUT&oauth_signature_method=HMAC-SHA1&oaut
+    h_timestamp=1286614914&oauth_token=1b9ded6ed3b49a0e147e32245e53a152&oaut
+    h_verifier=762191&oauth_version=1.0&oauth_signature=zK6c%2BNlL5w6PW0K7I3
+    JinXjDrss%3D
+
+    The signature is constructed by $proxy_uri, $oauth_token,
+    $oauth_token_secret, oauth_consumer_key and oauth_consumer_secret etc.
+    See rfc5849 for detail.
+
+  $oauth_signed_authenticated_call_uri
+    description: You can get the authenticated data with this uri. The base
+    uri is the variable of $proxy_uri. This uri is output like this:
+    http://api.t.sina.com.cn/statuses/friends_timeline.xml?count=20&oauth_co
+    nsumer_key=190008619&oauth_nonce=vhNCl3O2KDR63mDzIMCtXNB&oauth_signature
+    _method=HMAC-SHA1&oauth_timestamp=1286614915&oauth_token=cf6f67f79500f8b
+    b5803465ef9d28e33&oauth_version=1.0&oauth_signature=UQt%2B%2FmY3Uruvogua
+    IXbzyENCQbA%3D
+
+    The signature is constructed by $proxy_uri, $oauth_token,
+    $oauth_token_secret, oauth_consumer_key and oauth_consumer_secret etc.
+    See rfc5849 for detail.
 
 Installation
+    Get the liboauth (<http://liboauth.sourceforge.net/>), and install it.
+
     Download the latest version of the release tarball of this module from
-    github (<http://github.com/yaoweibin/nginx_http_oauth_module>)
+    github (<http://github.com/yaoweibin/nginx_http_oauth_module>). Also
+    this module need the nginx_session_store_module
+    (<http://github.com/yaoweibin/nginx_session_store_module>) and
+    nginx_eval_module (<http://github.com/yaoweibin/nginx-eval-module>).
 
     Grab the nginx source code from nginx.org (<http://nginx.org/>), for
     example, the version 0.7.67 (see nginx compatibility), and then build
@@ -39,7 +212,7 @@ Installation
         $ tar -xzvf nginx-0.7.67.tar.gz
         $ cd nginx-0.7.67/
 
-        $ ./configure --add-module=/path/to/nginx_http_oauth_module
+        $ ./configure --add-module=/path/to/nginx_session_store_module --add-module=/path/to/nginx_http_oauth_module --add-module=/path/to/nginx_eval_module 
 
         $ make
         $ make install
