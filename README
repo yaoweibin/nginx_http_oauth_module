@@ -24,6 +24,7 @@ Synopsis
 
             location / {
 
+                            #set $user_id $remote_user;
                 set $user_id 1669013120;
 
                 if ($user_id = "") {
@@ -89,10 +90,10 @@ Synopsis
                 eval_override_content_type application/x-www-form-urlencoded;
 
                 eval $oauth_token $oauth_token_secret $user_id {
+                    session_get zone=test $session_oauth_token $oauth_token_secret;
+
                     set $proxy_uri http://api.t.sina.com.cn/oauth/access_token?oauth_verifier=$arg_oauth_verifier;
                     set $oauth_token $arg_oauth_token;
-
-                    session_get zone=test $session_oauth_token $oauth_token_secret;
 
                     #proxy_method POST;
                     proxy_pass $oauth_signed_access_token_uri;
@@ -113,7 +114,9 @@ Synopsis
 
                 return 302;
             }
-            }
+
+        }
+
     }
 
 Description
@@ -154,11 +157,13 @@ Directives
 
     context: *http, server, location*
 
-    description: The variables used in the protocol exchanging.
+    description: The variables used in the protocol exchanging, especially
+    the signed uri variables below. These variables are changable and has
+    different meanings in differet stages of oauth.
 
 Variables
   $oauth_signed_request_token_uri
-    description: You can get the request token from this uri. The base uri
+    description: You can fetch the request token with this uri. The base uri
     is the variable of $proxy_uri. This request token uri is output like
     this:
     http://api.t.sina.com.cn/oauth/request_token?oauth_consumer_key=19000861
@@ -170,8 +175,9 @@ Variables
     oauth_consumer_secret etc. See rfc5849 for detail.
 
   $oauth_signed_access_token_uri
-    description: You can get the access token from this uri. The base uri is
-    the variable of $proxy_uri. This access token uri is output like this:
+    description: You can fetch the access token with this uri. The base uri
+    is the variable of $proxy_uri. This access token uri is output like
+    this:
     http://api.t.sina.com.cn/oauth/access_token?oauth_consumer_key=190008619
     &oauth_nonce=WiVUancz2jFbdhqfDxdUT&oauth_signature_method=HMAC-SHA1&oaut
     h_timestamp=1286614914&oauth_token=1b9ded6ed3b49a0e147e32245e53a152&oaut
@@ -183,8 +189,8 @@ Variables
     See rfc5849 for detail.
 
   $oauth_signed_authenticated_call_uri
-    description: You can get the authenticated data with this uri. The base
-    uri is the variable of $proxy_uri. This uri is output like this:
+    description: You can fetch the authenticated data with this uri. The
+    base uri is the variable of $proxy_uri. This uri is output like this:
     http://api.t.sina.com.cn/statuses/friends_timeline.xml?count=20&oauth_co
     nsumer_key=190008619&oauth_nonce=vhNCl3O2KDR63mDzIMCtXNB&oauth_signature
     _method=HMAC-SHA1&oauth_timestamp=1286614915&oauth_token=cf6f67f79500f8b
