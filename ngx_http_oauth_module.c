@@ -20,6 +20,21 @@ static ngx_int_t ngx_http_oauth_signed_access_token_uri_variable(ngx_http_reques
     ngx_http_variable_value_t *v, uintptr_t data);
 static ngx_int_t ngx_http_oauth_signed_authenticated_call_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
+
+static ngx_int_t ngx_http_oauth_signed_request_token_postargs_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_oauth_signed_access_token_postargs_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_oauth_signed_authenticated_call_postargs_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+
+static ngx_int_t ngx_http_oauth_signed_request_token_header_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_oauth_signed_access_token_header_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+static ngx_int_t ngx_http_oauth_signed_authenticated_call_header_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data);
+
 static ngx_int_t ngx_http_oauth_signature_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
 static ngx_int_t ngx_http_oauth_timestamp_variable(ngx_http_request_t *r,
@@ -64,6 +79,13 @@ static ngx_command_t  ngx_http_oauth_commands[] = {
       ngx_conf_set_str_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_oauth_loc_conf_t, consumer_secret),
+      NULL },
+
+    { ngx_string("oauth_realm"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      ngx_conf_set_str_slot,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      offsetof(ngx_http_oauth_loc_conf_t, realm),
       NULL },
 
     { ngx_string("oauth_signature_method"),
@@ -128,6 +150,30 @@ static ngx_http_variable_t  ngx_http_oauth_vars[] = {
 
     { ngx_string("oauth_signed_authenticated_call_uri"), NULL,
       ngx_http_oauth_signed_authenticated_call_uri_variable, 0,
+      NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_string("oauth_signed_request_token_postargs"), NULL,
+      ngx_http_oauth_signed_request_token_postargs_variable, 0,
+      NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_string("oauth_signed_access_token_postargs"), NULL,
+      ngx_http_oauth_signed_access_token_postargs_variable, 0,
+      NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_string("oauth_signed_authenticated_call_postargs"), NULL,
+      ngx_http_oauth_signed_authenticated_call_postargs_variable, 0,
+      NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_string("oauth_signed_request_token_header"), NULL,
+      ngx_http_oauth_signed_request_token_header_variable, 0,
+      NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_string("oauth_signed_access_token_header"), NULL,
+      ngx_http_oauth_signed_access_token_header_variable, 0,
+      NGX_HTTP_VAR_NOHASH, 0 },
+
+    { ngx_string("oauth_signed_authenticated_call_header"), NULL,
+      ngx_http_oauth_signed_authenticated_call_header_variable, 0,
       NGX_HTTP_VAR_NOHASH, 0 },
 
     { ngx_string("oauth_signature"), NULL,
@@ -439,6 +485,607 @@ not_found:
 }
 
 
+static void
+make_body_length_variable_changable(ngx_http_request_t *r)
+{
+    ngx_http_variable_value_t  *vv;
+
+    ngx_str_t name = ngx_string("proxy_internal_body_length");
+    ngx_uint_t key;
+
+    key = ngx_hash_key(name.data, name.len);
+
+    vv = ngx_http_get_variable(r, &name, key);
+
+    if (vv) {
+        ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "body_length");
+
+        vv->valid = 0;
+        vv->not_found = 0;
+        vv->no_cacheable = 1;
+    }
+}
+
+
+static ngx_int_t 
+ngx_http_oauth_signed_request_token_postargs_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    u_char                     *req_url, *proxy_uri, *postargs = NULL;
+    ngx_str_t                   args;
+    ngx_http_oauth_loc_conf_t  *olcf;
+    ngx_http_variable_value_t  *vv;
+
+    olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
+
+    if (olcf->proxy_uri_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->proxy_uri_index);
+
+        if (vv->len == 0) {
+            goto not_found;
+        }
+
+        proxy_uri = ngx_pcalloc(r->pool, vv->len + 1);
+        if (proxy_uri == NULL) {
+            goto not_found;
+        }
+
+        ngx_memcpy(proxy_uri, vv->data, vv->len);
+    }
+    else {
+        goto not_found;
+    }
+
+    req_url = (u_char *) oauth_sign_url2((char *)proxy_uri, 
+            (char **)&postargs, olcf->signature_methods, NULL, 
+            (char *)olcf->consumer_key.data, 
+            (char *)olcf->consumer_secret.data, NULL, NULL);
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "request_token_postargs: req_url=\"%s\", postargs=\"%s\"",
+                   req_url, postargs);
+    
+    args.len = ngx_strlen(postargs);
+    args.data = ngx_palloc(r->pool, args.len);
+    if (args.data == NULL) {
+
+        if (req_url) {
+            free(req_url);
+        }
+
+        if (postargs) {
+            free(postargs);
+        }
+
+        goto not_found;
+    }
+
+    ngx_memcpy(args.data, postargs, args.len);
+
+    if (req_url) {
+        free(req_url);
+    }
+
+    if (postargs) {
+        free(postargs);
+    }
+
+    make_body_length_variable_changable(r);
+
+    v->len = args.len;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+    v->data = args.data;
+
+    return NGX_OK;
+
+not_found:
+
+    v->not_found = 1;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_oauth_signed_access_token_postargs_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    u_char                     *req_url, *proxy_uri, *postargs = NULL;
+    ngx_str_t                   args, t_key, t_secret;
+    ngx_http_oauth_loc_conf_t  *olcf;
+    ngx_http_variable_value_t  *vv;
+
+    olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
+
+    if (olcf->proxy_uri_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->proxy_uri_index);
+
+        if (vv->len == 0) {
+            goto not_found;
+        }
+
+        proxy_uri = ngx_pcalloc(r->pool, vv->len + 1);
+        if (proxy_uri == NULL) {
+            goto not_found;
+        }
+
+        ngx_memcpy(proxy_uri, vv->data, vv->len);
+    }
+    else {
+        goto not_found;
+    }
+
+    if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+        goto not_found;
+    }
+
+    vv = ngx_http_get_indexed_variable(r, olcf->token_index);
+
+    t_key.len = vv->len;
+    t_key.data = vv->data;
+
+    if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+        goto not_found;
+    }
+
+    vv = ngx_http_get_indexed_variable(r, olcf->token_secret_index);
+
+    t_secret.len = vv->len;
+    t_secret.data = vv->data;
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "oauth_token: \"%V\", oauth_secret: \"%V\"", 
+                   &t_key, &t_secret);
+
+    req_url = (u_char *) oauth_sign_url2((char *)proxy_uri, 
+            (char **) &postargs, olcf->signature_methods, NULL, 
+            (char *)olcf->consumer_key.data, 
+            (char *)olcf->consumer_secret.data, 
+           (char *)oauth_pstrdup(r->pool, &t_key), 
+           (char *)oauth_pstrdup(r->pool, &t_secret));
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "access_token_postargs: req_url=\"%s\", postargs=\"%s\"",
+                   req_url, postargs);
+
+    args.len = ngx_strlen(postargs);
+    args.data = ngx_palloc(r->pool, args.len);
+    if (args.data == NULL) {
+        if (req_url) {
+            free(req_url);
+        }
+
+        if (postargs) {
+            free(postargs);
+        }
+
+        goto not_found;
+    }
+
+    ngx_memcpy(args.data, postargs, args.len);
+
+    if (req_url) {
+        free(req_url);
+    }
+
+    if (postargs) {
+        free(postargs);
+    }
+
+    make_body_length_variable_changable(r);
+
+    v->len = args.len;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+    v->data = args.data;
+
+    return NGX_OK;
+
+not_found:
+
+    v->not_found = 1;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_oauth_signed_authenticated_call_postargs_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    u_char                     *req_url, *proxy_uri, *postargs = NULL;
+    ngx_str_t                   args, t_key, t_secret;
+    ngx_http_oauth_ctx_t       *oauth_ctx;
+    ngx_http_oauth_loc_conf_t  *olcf;
+    ngx_http_variable_value_t  *vv;
+
+    olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
+
+    if (olcf->proxy_uri_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->proxy_uri_index);
+
+        if (vv->len == 0) {
+            goto not_found;
+        }
+
+        proxy_uri = ngx_pcalloc(r->pool, vv->len + 1);
+        if (proxy_uri == NULL) {
+            goto not_found;
+        }
+
+        ngx_memcpy(proxy_uri, vv->data, vv->len);
+    }
+    else {
+        goto not_found;
+    }
+
+    oauth_ctx = ngx_http_get_module_ctx(r, ngx_http_oauth_module);
+
+    if(oauth_ctx && oauth_ctx->token.len > 0) {
+        t_key = oauth_ctx->token;
+        t_secret = oauth_ctx->token_secret;
+    }
+    else {
+        if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+            goto not_found;
+        }
+
+        vv = ngx_http_get_indexed_variable(r, olcf->token_index);
+        t_key.len = vv->len;
+        t_key.data = vv->data;
+
+        if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+            goto not_found;
+        }
+
+        vv = ngx_http_get_indexed_variable(r, olcf->token_secret_index);
+
+        t_secret.len = vv->len;
+        t_secret.data = vv->data;
+    }
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "oauth_token: \"%V\", oauth_secret: \"%V\"", 
+                   &t_key, &t_secret);
+
+    req_url = (u_char *) oauth_sign_url2((char *)proxy_uri, 
+            (char **) &postargs, olcf->signature_methods, NULL, 
+            (char *)olcf->consumer_key.data, 
+            (char *)olcf->consumer_secret.data, 
+           (char *)oauth_pstrdup(r->pool, &t_key), 
+           (char *)oauth_pstrdup(r->pool, &t_secret));
+
+    args.len = ngx_strlen(postargs);
+    args.data = ngx_palloc(r->pool, args.len);
+    if (args.data == NULL) {
+        if (req_url) {
+            free(req_url);
+        }
+
+        if (postargs) {
+            free(postargs);
+        }
+
+        goto not_found;
+    }
+
+    ngx_memcpy(args.data, postargs, args.len);
+
+    if (req_url) {
+        free(req_url);
+    }
+
+    if (postargs) {
+        free(postargs);
+    }
+
+    make_body_length_variable_changable(r);
+
+    v->len = args.len;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+    v->data = args.data;
+
+    return NGX_OK;
+
+not_found:
+
+    v->not_found = 1;
+    return NGX_OK;
+}
+
+
+static ngx_int_t 
+ngx_http_oauth_signed_request_token_header_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    char                       *req_hdr = NULL, **argv = NULL, *proxy_uri;
+    ngx_int_t                   argc;
+    ngx_str_t                   header;
+    ngx_http_oauth_loc_conf_t  *olcf;
+    ngx_http_variable_value_t  *vv;
+
+    olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
+
+    if (olcf->proxy_uri_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->proxy_uri_index);
+
+        if (vv->len == 0) {
+            goto not_found;
+        }
+
+        proxy_uri = ngx_pcalloc(r->pool, vv->len + 1);
+        if (proxy_uri == NULL) {
+            goto not_found;
+        }
+
+        ngx_memcpy(proxy_uri, vv->data, vv->len);
+    }
+    else {
+        goto not_found;
+    }
+
+    argc = oauth_split_url_parameters((char *)proxy_uri, &argv);
+
+    oauth_sign_array2_process(&argc, &argv, NULL, olcf->signature_methods, 
+            NULL, (char *)olcf->consumer_key.data, 
+            (char *)olcf->consumer_secret.data, NULL, NULL);
+
+    /*we split [x_]oauth_ parameters (for use in HTTP Authorization header)*/
+    req_hdr = oauth_serialize_url_sep(argc, 1, argv, ", ", 6);
+
+    oauth_free_array(&argc, &argv);
+
+    header.len = sizeof("Authorization: OAuth realm=\"") - 1 + 
+        olcf->realm.len + sizeof("\", ") - 1 + ngx_strlen(req_hdr) + 1;
+
+    header.data = ngx_palloc(r->pool, header.len);
+    if (header.data == NULL) {
+        if(req_hdr) {
+            free(req_hdr);
+        }
+
+        goto not_found;
+    }
+
+    ngx_snprintf(header.data, header.len, "Authorization: OAuth realm=\"%V\", %s", 
+            &olcf->realm, req_hdr);
+
+    if(req_hdr) {
+        free(req_hdr);
+    }
+
+    v->len = header.len;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+    v->data = header.data;
+
+    return NGX_OK;
+
+not_found:
+
+    v->not_found = 1;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_oauth_signed_access_token_header_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    char                       *req_hdr = NULL, **argv = NULL, *proxy_uri;
+    ngx_int_t                   argc;
+    ngx_str_t                   header, t_key, t_secret;
+    ngx_http_oauth_ctx_t       *oauth_ctx;
+    ngx_http_oauth_loc_conf_t  *olcf;
+    ngx_http_variable_value_t  *vv;
+
+    olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
+
+    if (olcf->proxy_uri_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->proxy_uri_index);
+
+        if (vv->len == 0) {
+            goto not_found;
+        }
+
+        proxy_uri = ngx_pcalloc(r->pool, vv->len + 1);
+        if (proxy_uri == NULL) {
+            goto not_found;
+        }
+
+        ngx_memcpy(proxy_uri, vv->data, vv->len);
+    }
+    else {
+        goto not_found;
+    }
+
+    oauth_ctx = ngx_http_get_module_ctx(r, ngx_http_oauth_module);
+
+    if(oauth_ctx && oauth_ctx->token.len > 0) {
+        t_key = oauth_ctx->token;
+        t_secret = oauth_ctx->token_secret;
+    }
+    else {
+        if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+            goto not_found;
+        }
+
+        vv = ngx_http_get_indexed_variable(r, olcf->token_index);
+        t_key.len = vv->len;
+        t_key.data = vv->data;
+
+        if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+            goto not_found;
+        }
+
+        vv = ngx_http_get_indexed_variable(r, olcf->token_secret_index);
+
+        t_secret.len = vv->len;
+        t_secret.data = vv->data;
+    }
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "oauth_token: \"%V\", oauth_secret: \"%V\"", 
+                   &t_key, &t_secret);
+
+    argc = oauth_split_url_parameters((char *)proxy_uri, &argv);
+
+    oauth_sign_array2_process(&argc, &argv, NULL, olcf->signature_methods, NULL,
+            (char *)olcf->consumer_key.data, 
+            (char *)olcf->consumer_secret.data, 
+            (char *)t_key.data,
+            (char *)t_secret.data);
+
+    /*we split [x_]oauth_ parameters (for use in HTTP Authorization header)*/
+    req_hdr = oauth_serialize_url_sep(argc, 1, argv, ", ", 6);
+
+    oauth_free_array(&argc, &argv);
+
+    header.len = sizeof("Authorization: OAuth realm=\"") - 1 + 
+        olcf->realm.len + sizeof("\", ") - 1 + ngx_strlen(req_hdr) + 1;
+
+    header.data = ngx_palloc(r->pool, header.len);
+    if (header.data == NULL) {
+        if(req_hdr) {
+            free(req_hdr);
+        }
+
+        goto not_found;
+    }
+
+    ngx_snprintf(header.data, header.len, "Authorization: OAuth realm=\"%V\", %s", 
+            &olcf->realm, req_hdr);
+
+    if(req_hdr) {
+        free(req_hdr);
+    }
+
+    v->len = header.len;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+    v->data = header.data;
+
+    return NGX_OK;
+
+not_found:
+
+    v->not_found = 1;
+    return NGX_OK;
+}
+
+
+static ngx_int_t
+ngx_http_oauth_signed_authenticated_call_header_variable(ngx_http_request_t *r,
+    ngx_http_variable_value_t *v, uintptr_t data)
+{
+    char                       *req_hdr = NULL, **argv = NULL, *proxy_uri;
+    ngx_int_t                   argc;
+    ngx_str_t                   header, t_key, t_secret;
+    ngx_http_oauth_ctx_t       *oauth_ctx;
+    ngx_http_oauth_loc_conf_t  *olcf;
+    ngx_http_variable_value_t  *vv;
+
+    olcf = ngx_http_get_module_loc_conf(r, ngx_http_oauth_module);
+
+    if (olcf->proxy_uri_index != NGX_CONF_UNSET_UINT) {
+        vv = ngx_http_get_indexed_variable(r, olcf->proxy_uri_index);
+
+        if (vv->len == 0) {
+            goto not_found;
+        }
+
+        proxy_uri = ngx_pcalloc(r->pool, vv->len + 1);
+        if (proxy_uri == NULL) {
+            goto not_found;
+        }
+
+        ngx_memcpy(proxy_uri, vv->data, vv->len);
+    }
+    else {
+        goto not_found;
+    }
+
+    oauth_ctx = ngx_http_get_module_ctx(r, ngx_http_oauth_module);
+
+    if(oauth_ctx && oauth_ctx->token.len > 0) {
+        t_key = oauth_ctx->token;
+        t_secret = oauth_ctx->token_secret;
+    }
+    else {
+        if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+            goto not_found;
+        }
+
+        vv = ngx_http_get_indexed_variable(r, olcf->token_index);
+        t_key.len = vv->len;
+        t_key.data = vv->data;
+
+        if (olcf->token_index == NGX_CONF_UNSET_UINT) {
+            goto not_found;
+        }
+
+        vv = ngx_http_get_indexed_variable(r, olcf->token_secret_index);
+
+        t_secret.len = vv->len;
+        t_secret.data = vv->data;
+    }
+
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "oauth_token: \"%V\", oauth_secret: \"%V\"", 
+                   &t_key, &t_secret);
+
+    argc = oauth_split_url_parameters((char *)proxy_uri, &argv);
+
+    oauth_sign_array2_process(&argc, &argv, NULL, olcf->signature_methods, NULL,
+            (char *)olcf->consumer_key.data, 
+            (char *)olcf->consumer_secret.data, 
+            (char *)t_key.data,
+            (char *)t_secret.data);
+
+    /*we split [x_]oauth_ parameters (for use in HTTP Authorization header)*/
+    req_hdr = oauth_serialize_url_sep(argc, 1, argv, ", ", 6);
+
+    oauth_free_array(&argc, &argv);
+
+    header.len = sizeof("Authorization: OAuth realm=\"") - 1 + 
+        olcf->realm.len + sizeof("\", ") - 1 + ngx_strlen(req_hdr) + 1;
+
+    header.data = ngx_palloc(r->pool, header.len);
+    if (header.data == NULL) {
+        if(req_hdr) {
+            free(req_hdr);
+        }
+
+        goto not_found;
+    }
+
+    ngx_snprintf(header.data, header.len, "Authorization: OAuth realm=\"%V\", %s", 
+            &olcf->realm, req_hdr);
+
+    if(req_hdr) {
+        free(req_hdr);
+    }
+
+    v->len = header.len;
+    v->valid = 1;
+    v->no_cacheable = 0;
+    v->not_found = 0;
+    v->data = header.data;
+
+    return NGX_OK;
+
+not_found:
+
+    v->not_found = 1;
+    return NGX_OK;
+}
+
+
 static ngx_int_t 
 ngx_http_oauth_dummy_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data)
@@ -614,6 +1261,7 @@ ngx_http_oauth_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_str_value(conf->consumer_key, prev->consumer_key, "");
     ngx_conf_merge_str_value(conf->consumer_secret, prev->consumer_secret, "");
+    ngx_conf_merge_str_value(conf->realm, prev->realm, "");
 
     ngx_conf_merge_str_value(conf->request_token_uri, 
             prev->request_token_uri, "");

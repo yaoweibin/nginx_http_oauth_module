@@ -10,6 +10,7 @@ typedef struct {
     ngx_flag_t enable;
     ngx_str_t consumer_key;
     ngx_str_t consumer_secret;
+    ngx_str_t realm;
 
     ngx_str_t request_token_uri;
     ngx_str_t call_back_uri;
