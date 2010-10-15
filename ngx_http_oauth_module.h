@@ -26,6 +26,7 @@ typedef struct {
     ngx_uint_t token_secret_index;
     ngx_uint_t proxy_uri_index;
 
+    ngx_uint_t body_length_index;
     ngx_uint_t verifier_index;
     ngx_uint_t session_handle_index;
     ngx_uint_t expries_in_index;
