@@ -9,7 +9,7 @@ Status
     We need your help! If you find this module useful and/or interesting,
     please consider joining the development!
 
-example
+examples
   a simple get example
     http {
 
@@ -527,7 +527,7 @@ Variables
     like this: OAuth realm="http://api.douban.com/",
     oauth_consumer_key="08d97fc919fee0b41a8c7f5b4dfca21c",
     oauth_nonce="gIfvcyr9c5oUOhL2F3Y8", oauth_signature_method="HMAC-SHA1",
-    oauth_timestamp="12871 28845", oauth_version="1.0",
+    oauth_timestamp="1287128845", oauth_version="1.0",
     oauth_signature="VewnNJT0kh5fQFWkBFsYZ5GS37k%3D"
 
     The signature is constructed by $proxy_uri, oauth_consumer_key and
@@ -535,7 +535,7 @@ Variables
     request body with the directive of proxy_set_body. You could set the
     request's authorrization header like this:
 
-    proxy_set_header Authorization $oauth_signed_request_token_postargs;
+    proxy_set_header Authorization $oauth_signed_request_token_header;
 
   $oauth_signed_access_token_header
     description: You can fetch the access token with this authorization
@@ -544,7 +544,7 @@ Variables
     like this: OAuth realm="http://api.douban.com/",
     oauth_consumer_key="08d97fc919fee0b41a8c7f5b4dfca21c",
     oauth_nonce="GMkRTCr5dHueZQlIX", oauth_signature_method="HMAC-SHA1",
-    oauth_timestamp="12871288 47",
+    oauth_timestamp="1287128847",
     oauth_token="0a820ee61c07a2e81f862cb25416e8b8", oauth_version="1.0",
     oauth_signature="EqlVebguiov1%2Fsa79xqWoxhYVWA%3D"
 
@@ -562,7 +562,7 @@ Variables
     like this: OAuth realm="http://api.douban.com/",
     oauth_consumer_key="08d97fc919fee0b41a8c7f5b4dfca21c",
     oauth_nonce="1gJxmVBe0oDFtkRS1EjZhxKODKqvLE",
-    oauth_signature_method="HMAC-SHA1", oauth_timest amp="1287128847",
+    oauth_signature_method="HMAC-SHA1", oauth_timestamp="1287128847",
     oauth_token="77f5806f876136be67e0814e9623a43a", oauth_version="1.0",
     oauth_signature="ss43G54qkh3Wb8A8SyPhMD76ia4%3D"
 
