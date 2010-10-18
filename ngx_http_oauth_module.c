@@ -7,13 +7,13 @@
 
 static char * ngx_http_oauth_variables(ngx_conf_t *cf, ngx_command_t *cmd,
         void *conf);
-
 static ngx_int_t ngx_http_oauth_add_variables(ngx_conf_t *cf);
 
 static ngx_int_t ngx_http_oauth_consumer_key_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
 static ngx_int_t ngx_http_oauth_nonce_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
+
 static ngx_int_t ngx_http_oauth_signed_request_token_uri_variable(ngx_http_request_t *r,
     ngx_http_variable_value_t *v, uintptr_t data);
 static ngx_int_t ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
@@ -335,9 +335,6 @@ ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     t_key.len = vv->len;
     t_key.data = vv->data;
 
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "oauth_token: \"%V\"", &t_key);
-
     if (olcf->token_index == NGX_CONF_UNSET_UINT) {
         goto not_found;
     }
@@ -347,8 +344,9 @@ ngx_http_oauth_signed_access_token_uri_variable(ngx_http_request_t *r,
     t_secret.len = vv->len;
     t_secret.data = vv->data;
 
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                   "oauth_secret: \"%V\"", &t_secret);
+    ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+                   "oauth_token: \"%V\", oauth_secret: \"%V\"", 
+                   &t_key, &t_secret);
 
     req_url = (u_char *) oauth_sign_url2((char *)proxy_uri, 
             NULL, olcf->signature_methods, NULL, 
@@ -1311,4 +1309,3 @@ ngx_http_oauth_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
     return NGX_CONF_OK;
 }
-
