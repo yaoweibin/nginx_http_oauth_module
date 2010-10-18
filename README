@@ -13,6 +13,7 @@ examples
   a simple get example
     http {
 
+            resolver your_dns_server;
         server {
             listen       80;
             server_name  localhost;
@@ -59,7 +60,7 @@ examples
                     return 403;
                 }
 
-                set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo%20bar&bar=baz";
+                set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo&bar=baz";
                 proxy_pass $oauth_signed_authenticated_call_uri;
             }
 
@@ -85,7 +86,7 @@ examples
 
                 session_store zone=test $oauth_token $oauth_token_secret expire=1d;
 
-                add_header Location http://yaoweibin.cn/;
+                add_header Location http://localhost/;
 
                 return 302;
             }
@@ -93,6 +94,8 @@ examples
     }
 
   a simple post example
+    resolver your_dns_server;
+
     http {
 
         server {
@@ -141,7 +144,7 @@ examples
                     return 403;
                 }
 
-                set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo%20bar&bar=baz";
+                set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo&bar=baz";
 
                 proxy_set_body $oauth_signed_authenticated_call_postargs;
                 proxy_method POST;
@@ -180,7 +183,7 @@ examples
 
                 session_store zone=test $oauth_token $oauth_token_secret expire=1d;
 
-                add_header Location http://yaoweibin.cn/;
+                add_header Location http://localhost/;
 
                 return 302;
             }
@@ -188,6 +191,8 @@ examples
     }
 
   a simple authorization header example
+    resolver your_dns_server;
+
     http {
 
         server {
@@ -236,7 +241,7 @@ examples
                     return 403;
                 }
 
-                set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo%20bar&bar=baz";
+                set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo&bar=baz";
                 proxy_set_header Authorization $oauth_signed_authenticated_call_header;
                 proxy_pass $proxy_uri;
             }
@@ -265,7 +270,7 @@ examples
 
                 session_store zone=test $oauth_token $oauth_token_secret expire=1d;
 
-                add_header Location http://yaoweibin.cn/;
+                add_header Location http://localhost/;
 
                 return 302;
             }
@@ -273,11 +278,13 @@ examples
     }
 
   a full get example
+    resolver your_dns_server;
+
     http {
 
         server {
             listen       80;
-            server_name  _ localhost example.cn;
+            server_name  _ example.cn;
 
             oauth_consumer_key 190008619;
             oauth_consumer_secret 6054e105136d8eb353c8af2793f0a67;
@@ -344,7 +351,7 @@ examples
                 session_store zone=test $oauth_token $oauth_token_secret;
 
                 #redirect to the authorize page
-                add_header Location http://api.t.sina.com.cn/oauth/authorize?oauth_token=$oauth_token&oauth_callback=http://yaoweibin.cn/ready&display=page;
+                add_header Location http://api.t.sina.com.cn/oauth/authorize?oauth_token=$oauth_token&oauth_callback=http://example.cn/ready&display=page;
 
                 return 302;
             }
