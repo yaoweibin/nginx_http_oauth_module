@@ -9,13 +9,26 @@ ngx_feature_libs="-loauth"
 ngx_feature_test="oauth_gen_nonce();"
 . auto/feature
 
+if [ $ngx_found = no ]; then
+# FreeBSD, OpenBSD
+    ngx_feature="liboauth library in /usr/local/"
+    ngx_feature_path="$ngx_feature_path /usr/local/include"
+    if [ $NGX_RPATH = YES ]; then
+        ngx_feature_libs="-R/usr/local/lib -L/usr/local/lib -loauth"
+    else
+        ngx_feature_libs="-L/usr/local/lib -loauth"
+    fi
+    . auto/feature
+fi
+
 if [ $ngx_found = yes ]; then
     CORE_INCS="$CORE_INCS $ngx_feature_path"
     ngx_addon_name=ngx_http_oauth_module
     HTTP_MODULES="$HTTP_MODULES ngx_http_oauth_module"
     NGX_ADDON_DEPS="$NGX_ADDON_DEPS $ngx_feature_deps"
     NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_oauth_src"
-    CORE_LIBS="$CORE_LIBS -loauth"
+    CORE_INCS="$CORE_INCS $ngx_feature_path"
+    CORE_LIBS="$CORE_LIBS $ngx_feature_libs"
 else 
     cat << END
     $0: error: the ngx_http_oauth_module addon needs liboauth.

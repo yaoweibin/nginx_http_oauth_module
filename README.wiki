@@ -302,22 +302,22 @@ resolver your_dns_server;
 
 http {
 
+    resolver your_dns_server;
     server {
         listen       80;
-        server_name  _ example.cn;
-        
-        oauth_consumer_key 190008619;
-        oauth_consumer_secret 6054e105136d8eb353c8af2793f0a67;
+        server_name  _ localhost example.cn;
+
+        oauth_consumer_key J7ohNh8uATJugHZW2g5A;
+        oauth_consumer_secret W9c6ucRYCTTD4Y13v7wQ6iTLNYs1cHDzGa2PHCDkg;
         oauth_variables $oauth_token $oauth_token_secret $proxy_uri;
         session_zone $binary_remote_addr zone=test:10M;
-        session_zone $user_id zone=sina:10M;
+        session_zone $screen_name zone=twitter:10M;
 
         location / {
 
-			#set $user_id $remote_user;
-            set $user_id 1669013120;
+            set $screen_name yaoweibin;
 
-            if ($user_id = "") {
+            if ($screen_name  = "") {
                 rewrite (.*) /session last;
             }
 
@@ -327,7 +327,7 @@ http {
         }
 
         location /get_local_session {
-            session_get zone=sina $oauth_token $oauth_token_secret;
+            session_get zone=twitter $oauth_token $oauth_token_secret;
 
             if ($oauth_token = "") {
                 rewrite (.*) /session last;
@@ -349,15 +349,20 @@ http {
                 return 403;
             }
 
-            set $proxy_uri http://api.t.sina.com.cn$request_uri;
+            set $proxy_uri http://api.twitter.com$request_uri;
             proxy_pass $oauth_signed_authenticated_call_uri;
         }
 
         location /session {
             eval_override_content_type application/x-www-form-urlencoded;
             eval $oauth_token $oauth_token_secret {
-                set $proxy_uri "http://api.t.sina.com.cn/oauth/request_token";
-                proxy_pass $oauth_signed_request_token_uri;
+                set $proxy_uri "http://api.twitter.com/oauth/request_token?oauth_callback=http://example.cn/ready";
+                proxy_set_body $oauth_signed_request_token_postargs;
+                proxy_method POST;
+                proxy_set_header Accept-Encoding identity;
+                proxy_set_header Content-Type application/x-www-form-urlencoded;
+
+                proxy_pass "http://api.twitter.com/oauth/request_token";
             }
 
             if ($oauth_token = "") {
@@ -370,8 +375,7 @@ http {
 
             session_store zone=test $oauth_token $oauth_token_secret;
 
-            #redirect to the authorize page
-            add_header Location http://api.t.sina.com.cn/oauth/authorize?oauth_token=$oauth_token&oauth_callback=http://example.cn/ready&display=page;
+            add_header Location http://api.twitter.com/oauth/authorize?oauth_token=$oauth_token;
 
             return 302;
         }
@@ -379,14 +383,18 @@ http {
         location /ready {
             eval_override_content_type application/x-www-form-urlencoded;
 
-            eval $oauth_token $oauth_token_secret $user_id {
+            eval $oauth_token $oauth_token_secret $screen_name {
                 session_get zone=test $session_oauth_token $oauth_token_secret;
 
-                set $proxy_uri http://api.t.sina.com.cn/oauth/access_token?oauth_verifier=$arg_oauth_verifier;
+                set $proxy_uri http://api.twitter.com/oauth/access_token?oauth_verifier=$arg_oauth_verifier;
                 set $oauth_token $arg_oauth_token;
 
-                #proxy_method POST;
-                proxy_pass $oauth_signed_access_token_uri;
+                proxy_set_body $oauth_signed_access_token_postargs;
+                proxy_method POST;
+                proxy_set_header Content-Type application/x-www-form-urlencoded;
+                proxy_set_header Accept-Encoding identity;
+
+                proxy_pass $proxy_uri;
             }
 
             if ($oauth_token = "") {
@@ -397,14 +405,13 @@ http {
                 return 403;
             }
 
-            #save the access_token and secret
-            session_store zone=sina $oauth_token $oauth_token_secret expire=1d;
+            session_store zone=twitter $oauth_token $oauth_token_secret expire=1d;
 
-            add_header Location http://example.cn/statuses/friends_timeline.xml?count=20;
+            add_header Location http://example.cn/1/statuses/friends_timeline.xml;
 
             return 302;
         }
-	}
+    }
 }
 
 </geshi>
@@ -567,7 +574,7 @@ Grab the nginx source code from [http://nginx.org/ nginx.org], for example, the 
     
 = Compatibility =
 
-* My test bed is 0.7.67 and 0.8.50.
+* My test bed is 0.7.67 and 0.8.42.
 
 = TODO =
 
