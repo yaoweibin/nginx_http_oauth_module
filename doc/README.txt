@@ -1,0 +1,657 @@
+Name
+    nginx_http_oauth_module - support oauth client with Nginx
+
+Status
+    This module is at its very early phase of development and considered
+    highly experimental. But you're encouraged to test it out on your side
+    and report any quirks that you experience.
+
+    We need your help! If you find this module useful and/or interesting,
+    please consider joining the development!
+
+examples
+  a simple get example
+    http {
+
+            resolver your_dns_server;
+        server {
+            listen       80;
+            server_name  localhost;
+
+            oauth_consumer_key key;
+            oauth_consumer_secret secret;
+            oauth_realm "http://example.org";
+            oauth_variables $oauth_token $oauth_token_secret $proxy_uri;
+            session_zone $user_id zone=test:10m;
+
+            #two step oauth
+            location  /{
+                set $user_id yaoweibin;
+
+                if ($user_id = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /get_local_session last;
+
+                return 404;
+            }
+
+            location /get_local_session {
+                session_get zone=test $oauth_token $oauth_token_secret;
+
+                if ($oauth_token = "") {
+                    rewrite (.*) /session last;
+                }
+
+                if ($oauth_token_secret = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /oauth_proxy last;
+            }
+
+            location /oauth_proxy {
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo&bar=baz";
+                proxy_pass $oauth_signed_authenticated_call_uri;
+            }
+
+            location /session {
+                eval_override_content_type application/x-www-form-urlencoded;
+                eval $oauth_token $oauth_token_secret {
+                    set $proxy_uri "http://term.ie/oauth/example/request_token.php";
+                    proxy_pass $oauth_signed_request_token_uri;
+                }
+
+                eval $oauth_token $oauth_token_secret {
+                    set $proxy_uri "http://term.ie/oauth/example/access_token.php";
+                    proxy_pass $oauth_signed_access_token_uri;
+                }
+
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                session_store zone=test $oauth_token $oauth_token_secret expire=1d;
+
+                add_header Location http://localhost/;
+
+                return 302;
+            }
+        }
+    }
+
+  a simple post example
+    resolver your_dns_server;
+
+    http {
+
+        server {
+            listen       80;
+            server_name  localhost;
+
+            oauth_consumer_key key;
+            oauth_consumer_secret secret;
+            oauth_realm "http://example.org";
+            oauth_variables $oauth_token $oauth_token_secret $proxy_uri;
+            session_zone $user_id zone=test:10m;
+
+            #two step oauth
+            location  /{
+                set $user_id yaoweibin;
+
+                if ($user_id = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /get_local_session last;
+
+                return 404;
+            }
+
+            location /get_local_session {
+                session_get zone=test $oauth_token $oauth_token_secret;
+
+                if ($oauth_token = "") {
+                    rewrite (.*) /session last;
+                }
+
+                if ($oauth_token_secret = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /oauth_proxy last;
+            }
+
+            location /oauth_proxy {
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo&bar=baz";
+
+                proxy_set_body $oauth_signed_authenticated_call_postargs;
+                proxy_method POST;
+                proxy_set_header Content-Type application/x-www-form-urlencoded;
+
+                proxy_pass http://term.ie/oauth/example/echo_api.php;
+            }
+
+            location /session {
+                eval_override_content_type application/x-www-form-urlencoded;
+                eval $oauth_token $oauth_token_secret {
+                    proxy_method POST;
+                    set $proxy_uri "http://term.ie/oauth/example/request_token.php";
+                    proxy_set_body $oauth_signed_request_token_postargs;
+                    proxy_set_header Content-Type application/x-www-form-urlencoded;
+
+                    proxy_pass "http://term.ie/oauth/example/request_token.php";
+                }
+
+                eval $oauth_token $oauth_token_secret {
+                    proxy_method POST;
+                    set $proxy_uri "http://term.ie/oauth/example/access_token.php";
+                    proxy_set_body $oauth_signed_access_token_postargs;
+                    proxy_set_header Content-Type application/x-www-form-urlencoded;
+
+                    proxy_pass "http://term.ie/oauth/example/access_token.php";
+                }
+
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                session_store zone=test $oauth_token $oauth_token_secret expire=1d;
+
+                add_header Location http://localhost/;
+
+                return 302;
+            }
+        }
+    }
+
+  a simple authorization header example
+    resolver your_dns_server;
+
+    http {
+
+        server {
+            listen       80;
+            server_name  localhost;
+
+            oauth_consumer_key key;
+            oauth_consumer_secret secret;
+            oauth_realm "http://example.org";
+            oauth_variables $oauth_token $oauth_token_secret $proxy_uri;
+            session_zone $user_id zone=test:10m;
+
+            #two step oauth
+            location  /{
+                set $user_id yaoweibin;
+
+                if ($user_id = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /get_local_session last;
+
+                return 404;
+            }
+
+            location /get_local_session {
+                session_get zone=test $oauth_token $oauth_token_secret;
+
+                if ($oauth_token = "") {
+                    rewrite (.*) /session last;
+                }
+
+                if ($oauth_token_secret = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /oauth_proxy last;
+            }
+
+            location /oauth_proxy {
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                set $proxy_uri "http://term.ie/oauth/example/echo_api.php?method=foo&bar=baz";
+                proxy_set_header Authorization $oauth_signed_authenticated_call_header;
+                proxy_pass $proxy_uri;
+            }
+
+            location /session {
+                eval_override_content_type application/x-www-form-urlencoded;
+                eval $oauth_token $oauth_token_secret {
+                    set $proxy_uri "http://term.ie/oauth/example/request_token.php";
+                    proxy_set_header Authorization $oauth_signed_request_token_header;
+                    proxy_pass $proxy_uri;
+                }
+
+                eval $oauth_token $oauth_token_secret {
+                    set $proxy_uri "http://term.ie/oauth/example/access_token.php";
+                    proxy_set_header Authorization $oauth_signed_access_token_header;
+                    proxy_pass $proxy_uri;
+                }
+
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                session_store zone=test $oauth_token $oauth_token_secret expire=1d;
+
+                add_header Location http://localhost/;
+
+                return 302;
+            }
+        }
+    }
+
+  a full get example
+    resolver your_dns_server;
+
+    http {
+
+        resolver your_dns_server;
+        server {
+            listen       80;
+            server_name  _ localhost example.cn;
+
+            oauth_consumer_key J7ohNh8uATJugHZW2g5A;
+            oauth_consumer_secret W9c6ucRYCTTD4Y13v7wQ6iTLNYs1cHDzGa2PHCDkg;
+            oauth_variables $oauth_token $oauth_token_secret $proxy_uri;
+            session_zone $binary_remote_addr zone=test:10M;
+            session_zone $screen_name zone=twitter:10M;
+
+            location / {
+
+                set $screen_name yaoweibin;
+
+                if ($screen_name  = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /get_local_session last;
+
+                return 404;
+            }
+
+            location /get_local_session {
+                session_get zone=twitter $oauth_token $oauth_token_secret;
+
+                if ($oauth_token = "") {
+                    rewrite (.*) /session last;
+                }
+
+                if ($oauth_token_secret = "") {
+                    rewrite (.*) /session last;
+                }
+
+                rewrite (.*) /oauth_proxy last;
+            }
+
+            location /oauth_proxy {
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                set $proxy_uri http://api.twitter.com$request_uri;
+                proxy_pass $oauth_signed_authenticated_call_uri;
+            }
+
+            location /session {
+                eval_override_content_type application/x-www-form-urlencoded;
+                eval $oauth_token $oauth_token_secret {
+                    set $proxy_uri "http://api.twitter.com/oauth/request_token?oauth_callback=http://example.cn/ready";
+                    proxy_set_body $oauth_signed_request_token_postargs;
+                    proxy_method POST;
+                    proxy_set_header Accept-Encoding identity;
+                    proxy_set_header Content-Type application/x-www-form-urlencoded;
+
+                    proxy_pass "http://api.twitter.com/oauth/request_token";
+                }
+
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                session_store zone=test $oauth_token $oauth_token_secret;
+
+                add_header Location http://api.twitter.com/oauth/authorize?oauth_token=$oauth_token;
+
+                return 302;
+            }
+
+            location /ready {
+                eval_override_content_type application/x-www-form-urlencoded;
+
+                eval $oauth_token $oauth_token_secret $screen_name {
+                    session_get zone=test $session_oauth_token $oauth_token_secret;
+
+                    set $proxy_uri http://api.twitter.com/oauth/access_token?oauth_verifier=$arg_oauth_verifier;
+                    set $oauth_token $arg_oauth_token;
+
+                    proxy_set_body $oauth_signed_access_token_postargs;
+                    proxy_method POST;
+                    proxy_set_header Content-Type application/x-www-form-urlencoded;
+                    proxy_set_header Accept-Encoding identity;
+
+                    proxy_pass $proxy_uri;
+                }
+
+                if ($oauth_token = "") {
+                    return 403;
+                }
+
+                if ($oauth_token_secret = "") {
+                    return 403;
+                }
+
+                session_store zone=twitter $oauth_token $oauth_token_secret expire=1d;
+
+                add_header Location http://example.cn/1/statuses/friends_timeline.xml;
+
+                return 302;
+            }
+        }
+    }
+
+Description
+    Add the support oauth client with Nginx.
+
+Directives
+  oauth_consumer_key
+    syntax:*oauth_consumer_key key_string*
+
+    default: *none*
+
+    context: *http, server, location*
+
+    description: The string of consumer key.
+
+  oauth_consumer_secret
+    syntax:*oauth_consumer_secret secret_string*
+
+    default: *none*
+
+    context: *http, server, location*
+
+    description: The string of consumer secret.
+
+  oauth_realm
+    syntax:*oauth_realm realm_string*
+
+    default: *none*
+
+    context: *http, server, location*
+
+    description: The string of realm when you use in the authorization
+    header.
+
+  oauth_signature_method
+    syntax:'oauth_signature_method HMAC-SHA1 | PLAINTEXT | RSA-SHA1''
+
+    default: *oauth_signature_method HMAC-SHA1*
+
+    context: *http, server, location*
+
+    description: The oauth signature method.
+
+  oauth_variables
+    syntax:'oauth_variables $oauth_token $oauth_token_secret $proxy_uri''
+
+    default: *none*
+
+    context: *http, server, location*
+
+    description: The variables used in the protocol exchanging, especially
+    the signed uri variables below. These variables are changable and has
+    different meanings in differet stages of oauth.
+
+Variables
+  $oauth_signed_request_token_uri
+    description: You can fetch the request token with this uri. The base uri
+    is the variable of $proxy_uri. This request token uri outputs like this:
+    http://api.t.sina.com.cn/oauth/request_token?oauth_consumer_key=19000861
+    9&oauth_nonce=akQcG8ydQ77lftD23F&oauth_signature_method=HMAC-SHA1&oauth_
+    timestamp=1286614404&oauth_version=1.0&oauth_signature=NqchRk%2F9wfwNybQ
+    ovV0j8QofCww%3D
+
+    The signature is constructed by $proxy_uri, oauth_consumer_key and
+    oauth_consumer_secret etc. See rfc5849 for detail.
+
+  $oauth_signed_access_token_uri
+    description: You can fetch the access token with this uri. The base uri
+    is the variable of $proxy_uri. This access token uri outputs like this:
+    http://api.t.sina.com.cn/oauth/access_token?oauth_consumer_key=190008619
+    &oauth_nonce=WiVUancz2jFbdhqfDxdUT&oauth_signature_method=HMAC-SHA1&oaut
+    h_timestamp=1286614914&oauth_token=1b9ded6ed3b49a0e147e32245e53a152&oaut
+    h_verifier=762191&oauth_version=1.0&oauth_signature=zK6c%2BNlL5w6PW0K7I3
+    JinXjDrss%3D
+
+    The signature is constructed by $proxy_uri, $oauth_token,
+    $oauth_token_secret, oauth_consumer_key and oauth_consumer_secret etc.
+    See rfc5849 for detail.
+
+  $oauth_signed_authenticated_call_uri
+    description: You can fetch the authenticated data with this uri. The
+    base uri is the variable of $proxy_uri. This uri outputs like this:
+    http://api.t.sina.com.cn/statuses/friends_timeline.xml?count=20&oauth_co
+    nsumer_key=190008619&oauth_nonce=vhNCl3O2KDR63mDzIMCtXNB&oauth_signature
+    _method=HMAC-SHA1&oauth_timestamp=1286614915&oauth_token=cf6f67f79500f8b
+    b5803465ef9d28e33&oauth_version=1.0&oauth_signature=UQt%2B%2FmY3Uruvogua
+    IXbzyENCQbA%3D
+
+    The signature is constructed by $proxy_uri, $oauth_token,
+    $oauth_token_secret, oauth_consumer_key and oauth_consumer_secret etc.
+    See rfc5849 for detail.
+
+  $oauth_signed_request_token_postargs
+    description: You can fetch the request token with this post body when
+    you use the post form-encoded body for parameter transmission. The base
+    uri is the variable of $proxy_uri. This request token post arguments
+    output like this:
+    oauth_consumer_key=190008619&oauth_nonce=akQcG8ydQ77lftD23F&oauth_signat
+    ure_method=HMAC-SHA1&oauth_timestamp=1286614404&oauth_version=1.0&oauth_
+    signature=NqchRk%2F9wfwNybQovV0j8QofCww%3D
+
+    The signature is constructed by $proxy_uri, oauth_consumer_key and
+    oauth_consumer_secret etc. See rfc5849 for detail. You can set the
+    request body with the directive of proxy_set_body. Also you should set
+    the request's content-type header like this:
+
+    proxy_set_header Content-Type application/x-www-form-urlencoded;
+
+  $oauth_signed_access_token_postargs
+    description: You can fetch the access token with this post arguments.
+    The base uri is the variable of $proxy_uri. This access token post
+    arguments output like this:
+    oauth_consumer_key=190008619&oauth_nonce=WiVUancz2jFbdhqfDxdUT&oauth_sig
+    nature_method=HMAC-SHA1&oauth_timestamp=1286614914&oauth_token=1b9ded6ed
+    3b49a0e147e32245e53a152&oauth_verifier=762191&oauth_version=1.0&oauth_si
+    gnature=zK6c%2BNlL5w6PW0K7I3JinXjDrss%3D
+
+    The signature is constructed by $proxy_uri, $oauth_token,
+    $oauth_token_secret, oauth_consumer_key and oauth_consumer_secret etc.
+    See rfc5849 for detail. You can set the request body with the directive
+    of proxy_set_body. Also you should set the request's content-type header
+    like this:
+
+    proxy_set_header Content-Type application/x-www-form-urlencoded;
+
+  $oauth_signed_authenticated_call_postargs
+    description: You can fetch the authenticated data with this post
+    arguments. The base uri is the variable of $proxy_uri. This post
+    arguments output like this:
+    oauth_consumer_key=190008619&oauth_nonce=vhNCl3O2KDR63mDzIMCtXNB&oauth_s
+    ignature_method=HMAC-SHA1&oauth_timestamp=1286614915&oauth_token=cf6f67f
+    79500f8bb5803465ef9d28e33&oauth_version=1.0&oauth_signature=UQt%2B%2FmY3
+    UruvoguaIXbzyENCQbA%3D
+
+    The signature is constructed by $proxy_uri, $oauth_token,
+    $oauth_token_secret, oauth_consumer_key and oauth_consumer_secret etc.
+    See rfc5849 for detail. You can set the request body with the directive
+    of proxy_set_body. Also you should set the request's content-type header
+    like this:
+
+    proxy_set_header Content-Type application/x-www-form-urlencoded;
+
+  $oauth_signed_request_token_header
+    description: You can fetch the request token with this authorization
+    header when you use the header for parameter transmission. The base uri
+    is the variable of $proxy_uri. This request token header value output
+    like this: OAuth realm="http://api.douban.com/",
+    oauth_consumer_key="08d97fc919fee0b41a8c7f5b4dfca21c",
+    oauth_nonce="gIfvcyr9c5oUOhL2F3Y8", oauth_signature_method="HMAC-SHA1",
+    oauth_timestamp="1287128845", oauth_version="1.0",
+    oauth_signature="VewnNJT0kh5fQFWkBFsYZ5GS37k%3D"
+
+    The signature is constructed by $proxy_uri, oauth_consumer_key and
+    oauth_consumer_secret etc. See rfc5849 for detail. You can set the
+    request body with the directive of proxy_set_body. You could set the
+    request's authorrization header like this:
+
+    proxy_set_header Authorization $oauth_signed_request_token_header;
+
+  $oauth_signed_access_token_header
+    description: You can fetch the access token with this authorization
+    header when you use the header for parameter transmission. The base uri
+    is the variable of $proxy_uri. This access token header value output
+    like this: OAuth realm="http://api.douban.com/",
+    oauth_consumer_key="08d97fc919fee0b41a8c7f5b4dfca21c",
+    oauth_nonce="GMkRTCr5dHueZQlIX", oauth_signature_method="HMAC-SHA1",
+    oauth_timestamp="1287128847",
+    oauth_token="0a820ee61c07a2e81f862cb25416e8b8", oauth_version="1.0",
+    oauth_signature="EqlVebguiov1%2Fsa79xqWoxhYVWA%3D"
+
+    The signature is constructed by $proxy_uri, oauth_consumer_key and
+    oauth_consumer_secret etc. See rfc5849 for detail. You can set the
+    request body with the directive of proxy_set_body. You could set the
+    request's authorrization header like this:
+
+    proxy_set_header Authorization $oauth_signed_access_token_header;
+
+  $oauth_signed_authenticated_call_header
+    description: You can fetch the authenticated data with this
+    authorization header when you use the header for parameter transmission.
+    The base uri is the variable of $proxy_uri. This header value output
+    like this: OAuth realm="http://api.douban.com/",
+    oauth_consumer_key="08d97fc919fee0b41a8c7f5b4dfca21c",
+    oauth_nonce="1gJxmVBe0oDFtkRS1EjZhxKODKqvLE",
+    oauth_signature_method="HMAC-SHA1", oauth_timestamp="1287128847",
+    oauth_token="77f5806f876136be67e0814e9623a43a", oauth_version="1.0",
+    oauth_signature="ss43G54qkh3Wb8A8SyPhMD76ia4%3D"
+
+    The signature is constructed by $proxy_uri, oauth_consumer_key and
+    oauth_consumer_secret etc. See rfc5849 for detail. You can set the
+    request body with the directive of proxy_set_body. You could set the
+    request's authorrization header like this:
+
+    proxy_set_header Authorization $oauth_signed_authenticated_call_header;
+
+Installation
+    Get the liboauth (<http://liboauth.sourceforge.net/>), and install it.
+
+    Download the latest version of the release tarball of this module from
+    github (<http://github.com/yaoweibin/nginx_http_oauth_module>). Also
+    this module need the nginx_session_store_module
+    (<http://github.com/yaoweibin/nginx_session_store_module>) and
+    nginx_eval_module (<http://github.com/yaoweibin/nginx-eval-module>).
+
+    Grab the nginx source code from nginx.org (<http://nginx.org/>), for
+    example, the version 0.7.67 (see nginx compatibility), and then build
+    the source with this module:
+
+        $ wget 'http://nginx.org/download/nginx-0.7.67.tar.gz'
+        $ tar -xzvf nginx-0.7.67.tar.gz
+        $ cd nginx-0.7.67/
+
+        $ ./configure --add-module=/path/to/nginx_session_store_module --add-module=/path/to/nginx_http_oauth_module --add-module=/path/to/nginx_eval_module 
+
+        $ make
+        $ make install
+
+Compatibility
+    *   My test bed is 0.7.67 and 0.8.42.
+
+TODO
+Known Issues
+    *   Developing
+
+Changelogs
+  v0.1
+    *   first release
+
+Authors
+    Weibin Yao(姚伟斌) *yaoweibin at gmail dot com*
+
+Copyright & License
+    This README template copy from agentzh (<http://github.com/agentzh>).
+
+    This module is licensed under the BSD license.
+
+    Copyright (C) 2010 by Weibin Yao <yaoweibin@gmail.com>.
+
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are
+    met:
+
+    *   Redistributions of source code must retain the above copyright
+        notice, this list of conditions and the following disclaimer.
+
+    *   Redistributions in binary form must reproduce the above copyright
+        notice, this list of conditions and the following disclaimer in the
+        documentation and/or other materials provided with the distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+    IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+    TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+    PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+    HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+    TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+    PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+    LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+    NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
